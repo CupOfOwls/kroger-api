@@ -31,19 +31,30 @@ pip install -e .
 
 ```python
 from kroger_api import KrogerAPI
+from kroger_api.utils.env import load_and_validate_env, get_zip_code
+
+# Env -- set in .env
+load_and_validate_env(["KROGER_CLIENT_ID", "KROGER_CLIENT_SECRET"])
+zip_code = get_zip_code(default="10001")
 
 # Initialize the client
 kroger = KrogerAPI()
 
 # Get a client credentials token for public data
-kroger.authorization.get_token_with_client_credentials("product.compact")
+token_info = kroger.authorization.get_token_with_client_credentials("product.compact")
+
+locations = kroger.location.search_locations(
+                zip_code=zip_code,
+                radius_in_miles=10,
+                limit=1
+            )
 
 # Search for products
 products = kroger.product.search_products(
-    term="milk",
-    location_id="01400443",  # A Kroger store location
-    limit=5
-)
+        term="milk",
+        location_id=locations["data"][0]["locationId"],
+        limit=5
+    )
 
 print(f"Found {len(products['data'])} products!")
 ```
