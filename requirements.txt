@@ -1,0 +1,18 @@
+# Core dependencies for the kroger-api package
+requests>=2.25.0
+python-dotenv>=0.15.0
+certifi>=2021.0.0
+urllib3>=1.26.0
+
+# Optional dependencies for examples
+# Install with: pip install kroger-api[examples]
+tabulate>=0.8.0
+
+# Development dependencies (optional)
+# Install with: pip install kroger-api[dev]
+pytest>=7.0.0
+pytest-mock>=3.0.0
+requests-mock>=1.9.0
+black
+flake8
+mypy

@@ -1,0 +1,40 @@
+# Include the README
+include README.md
+
+# Include the license
+include LICENSE
+
+# Include requirements
+include requirements.txt
+
+# Include assets (demo videos, images, etc.)
+recursive-include assets *.mp4 *.gif *.png *.jpg *.jpeg
+
+# Include examples directory but don't package them in the main distribution
+recursive-include examples *.py
+prune examples/__pycache__
+
+# Exclude test files
+recursive-exclude tests *
+
+# Exclude development and build files
+exclude .env*
+exclude .gitignore
+exclude test_all_examples.sh
+exclude *.egg-info
+exclude .kroger_token*
+global-exclude *.pyc
+global-exclude __pycache__
+
+# Exclude documentation that shouldn't be in the package
+recursive-exclude docs_kroger_api *
+
+# Exclude virtual environment
+recursive-exclude venv *
+
+# Exclude git files
+recursive-exclude .git *
+
+# Exclude build artifacts
+recursive-exclude build *
+recursive-exclude dist *

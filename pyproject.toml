@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kroger-api"
+description = "A Python client library for the Kroger Public API"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Stephen Thoemmes", email = "thoemmes.stephen@gmail.com"}
+]
+keywords = ["kroger", "api", "grocery", "shopping", "retail"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+    "Topic :: Office/Business",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "requests>=2.25.0",
+    "python-dotenv>=0.15.0",
+    "certifi>=2021.0.0",
+    "urllib3>=1.26.0",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-mock>=3.0.0",
+    "requests-mock>=1.9.0",
+    "black",
+    "flake8",
+    "mypy",
+]
+examples = [
+    "tabulate>=0.8.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/CupOfOwls/kroger-api"
+Repository = "https://github.com/CupOfOwls/kroger-api"
+Documentation = "https://developer.kroger.com/documentation/public/"
+"Bug Reports" = "https://github.com/CupOfOwls/kroger-api/issues"
+"Demo Video" = "https://github.com/CupOfOwls/kroger-api/blob/main/assets/kroger-api-python-add-to-cart-demo.mp4"
+
+[tool.setuptools.packages.find]
+exclude = ["tests*", "docs_kroger_api*", "venv*", "examples*", "assets*"]
+
+[tool.setuptools_scm]

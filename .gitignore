@@ -1,0 +1,33 @@
+# Virtual environment
+venv/
+
+# Docs
+docs_kroger_api/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Environment variables
+.env
+
+# Token files
+.kroger_token*
+
+# IDE files
+.idea/
+.vscode/
+
+# Test coverage
+.coverage
+coverage/
+htmlcov/
+
+# Logs
+*.log
