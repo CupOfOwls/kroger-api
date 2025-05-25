@@ -4,11 +4,8 @@ A comprehensive Python client library for the Kroger Public API, featuring robus
 
 ## 📺 Demo
 
-Here's a quick demo of browsing via the Product API:
-
-<div align="center">
-  <img src="assets/product_api_script.gif" alt="Kroger API Python Demo">
-</div>
+Adding an item to your cart via an interactive Python script, and checking that it appears in your account:
+https://github.com/user-attachments/assets/23e8ba85-520e-4d09-bf44-28df434b85de
 
 ## 🚀 Quick Start
 
@@ -133,6 +130,12 @@ python examples/oauth_flow.py
 # Utility scripts
 python examples/clear_tokens.py  # Clear saved tokens
 ```
+
+Here's a quick demo of browsing via the Product API with `examples/product_api_examples.py`:
+
+<div align="center">
+  <img src="assets/product_api_script.gif" alt="Kroger API Python Demo">
+</div>
 
 ## 🏪 Kroger Public API Information
 
