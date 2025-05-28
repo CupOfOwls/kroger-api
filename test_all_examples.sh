@@ -11,4 +11,5 @@ python examples/location_api_examples.py
 python examples/product_api_examples.py
 python examples/authorization_api_examples.py
 python examples/oauth_flow.py
+python examples/oauth_pkce_flow.py
 python examples/token_refresh_example.py
