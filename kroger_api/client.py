@@ -41,7 +41,7 @@ class KrogerClient:
         self.token_info = None
         self.token_file = None
     
-    def get_authorization_url(self, scope: str, state: Optional[str] = None, banner: Optional[str] = None) -> str:
+    def get_authorization_url(self, scope: str, state: Optional[str] = None, banner: Optional[str] = None, code_challenge: Optional[str] = None, code_challenge_method: Optional[str] = None) -> str:
         """
         Get the URL to redirect the user to for authorization
         
@@ -49,6 +49,8 @@ class KrogerClient:
             scope: The level of access your application is requesting
             state: A random string to verify that the response belongs to the initiated request
             banner: Sets the chain specific branding displayed on the authorization consent screen
+            code_challenge: PKCE code challenge for enhanced security (recommended)
+            code_challenge_method: Method used to generate the code challenge (S256 is recommended)
             
         Returns:
             The authorization URL
@@ -65,6 +67,11 @@ class KrogerClient:
         
         if banner:
             params['banner'] = banner
+            
+        # Add PKCE parameters if provided
+        if code_challenge:
+            params['code_challenge'] = code_challenge
+            params['code_challenge_method'] = code_challenge_method or 'S256'
         
         auth_path = "/v1/connect/oauth2/authorize"
         url = urljoin(self.BASE_URL, auth_path)
@@ -106,12 +113,13 @@ class KrogerClient:
         
         return token_info
     
-    def get_token_with_authorization_code(self, code: str) -> Dict[str, Any]:
+    def get_token_with_authorization_code(self, code: str, code_verifier: Optional[str] = None) -> Dict[str, Any]:
         """
         Get an access token using an authorization code
         
         Args:
             code: The authorization code received from the redirect
+            code_verifier: PKCE code verifier used during authorization (if PKCE was used)
             
         Returns:
             The token information
@@ -122,11 +130,18 @@ class KrogerClient:
         # Set the token file for user tokens
         self.token_file = f".kroger_token_user.json"
         
-        token_info = self._get_token(
-            grant_type="authorization_code",
-            code=code,
-            redirect_uri=self.redirect_uri
-        )
+        # Prepare parameters for token request
+        params = {
+            'grant_type': 'authorization_code',
+            'code': code,
+            'redirect_uri': self.redirect_uri
+        }
+        
+        # Add code_verifier if provided (for PKCE)
+        if code_verifier:
+            params['code_verifier'] = code_verifier
+        
+        token_info = self._get_token(**params)
         
         # Save the token for future use
         save_token(token_info, self.token_file)

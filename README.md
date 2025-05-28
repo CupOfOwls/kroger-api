@@ -94,6 +94,7 @@ This library implements robust, automatic token management:
 - **Persistent storage** - Tokens saved securely to avoid repeated logins  
 - **Proactive validation** - Tests tokens before use
 - **Reactive recovery** - Automatically refreshes expired tokens during API calls
+- **PKCE Support** - Enhanced OAuth security with Proof Key for Code Exchange
 
 ### 🔧 How it Works
 
@@ -109,6 +110,37 @@ This library implements robust, automatic token management:
 Token files (automatically managed, stored in project root):
 - `.kroger_token_client_product.compact.json` - Client credentials tokens
 - `.kroger_token_user.json` - User authorization tokens
+
+### 🔒 Enhanced Security with PKCE
+
+This library supports PKCE (Proof Key for Code Exchange) for enhanced security in the OAuth flow:
+
+```python
+from kroger_api import KrogerAPI
+from kroger_api.utils import generate_pkce_parameters
+
+# Generate PKCE parameters
+pkce_params = generate_pkce_parameters()
+
+# Initialize the client
+kroger = KrogerAPI()
+
+# Get authorization URL with PKCE
+auth_url = kroger.authorization.get_authorization_url(
+    scope="cart.basic:write profile.compact",
+    state="random_state_value",
+    code_challenge=pkce_params['code_challenge'],
+    code_challenge_method=pkce_params['code_challenge_method']
+)
+
+# After user authorization and redirect, exchange code for token with verifier
+token_info = kroger.authorization.get_token_with_authorization_code(
+    code="authorization_code_from_redirect",
+    code_verifier=pkce_params['code_verifier']
+)
+```
+
+PKCE helps protect against authorization code interception attacks, particularly important for public clients or those using external tools to manage OAuth flows.
 
 ## 📚 Example Scripts
 

@@ -8,7 +8,7 @@ with open(os.path.join(this_directory, 'README.md'), encoding='utf-8') as f:
 
 setup(
     name="kroger-api",
-    version="0.1.0",
+    version="0.2.0",
     packages=find_packages(exclude=['tests*', 'docs_kroger_api*', 'venv*', 'examples*', 'assets*']),
     
     # Dependencies

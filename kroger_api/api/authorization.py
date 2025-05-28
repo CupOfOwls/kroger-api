@@ -18,7 +18,7 @@ class AuthorizationAPI:
         """
         self.client = client
     
-    def get_authorization_url(self, scope: str, state: Optional[str] = None, banner: Optional[str] = None) -> str:
+    def get_authorization_url(self, scope: str, state: Optional[str] = None, banner: Optional[str] = None, code_challenge: Optional[str] = None, code_challenge_method: Optional[str] = None) -> str:
         """
         Get the URL to redirect the user to for authorization
         
@@ -26,11 +26,13 @@ class AuthorizationAPI:
             scope: The level of access your application is requesting
             state: A random string to verify that the response belongs to the initiated request
             banner: Sets the chain specific branding displayed on the authorization consent screen
+            code_challenge: PKCE code challenge for enhanced security (recommended)
+            code_challenge_method: Method used to generate the code challenge (S256 is recommended)
             
         Returns:
             The authorization URL
         """
-        return self.client.get_authorization_url(scope, state, banner)
+        return self.client.get_authorization_url(scope, state, banner, code_challenge, code_challenge_method)
     
     def get_token_with_client_credentials(self, scope: str) -> Dict[str, Any]:
         """
@@ -44,17 +46,18 @@ class AuthorizationAPI:
         """
         return self.client.get_token_with_client_credentials(scope)
     
-    def get_token_with_authorization_code(self, code: str) -> Dict[str, Any]:
+    def get_token_with_authorization_code(self, code: str, code_verifier: Optional[str] = None) -> Dict[str, Any]:
         """
         Get an access token using an authorization code
         
         Args:
             code: The authorization code received from the redirect
+            code_verifier: PKCE code verifier used during authorization (if PKCE was used)
             
         Returns:
             The token information
         """
-        return self.client.get_token_with_authorization_code(code)
+        return self.client.get_token_with_authorization_code(code, code_verifier)
     
     def refresh_token(self, refresh_token: str) -> Dict[str, Any]:
         """
