@@ -8,6 +8,8 @@ Adding an item to your cart via an interactive Python script, and checking that 
 
 https://github.com/user-attachments/assets/0079cbc7-5af0-473b-909a-d43508fe43d5
 
+You can also check out [kroger-mcp](https://github.com/CupOfOwls/kroger-mcp), which is an implementation of the Model Context Protocol leveraging this kroger-api package!
+
 ## 🚀 Quick Start
 
 ### Installation
