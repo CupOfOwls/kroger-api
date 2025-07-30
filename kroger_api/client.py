@@ -21,7 +21,7 @@ class KrogerClient:
     Base client for interacting with the Kroger API
     """
     BASE_URL = "https://api.kroger.com"
-    
+     
     def __init__(self, client_id: str = None, client_secret: str = None, redirect_uri: str = None):
         """
         Initialize the Kroger API client

@@ -7,7 +7,7 @@ from kroger_api.token_storage import get_refresh_token, load_token
 class AuthorizationAPI:
     """
     Provides access to the Kroger Authorization API endpoints.
-    """
+    """ 
     
     def __init__(self, client: KrogerClient):
         """
