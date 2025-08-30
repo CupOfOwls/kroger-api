@@ -109,9 +109,11 @@ This library implements robust, automatic token management:
 2. On 401 Unauthorized errors, attempts token refresh
 3. Retries original request with new token
 
-Token files (automatically managed, stored in project root):
+Token files (automatically managed):
 - `.kroger_token_client_product.compact.json` - Client credentials tokens
 - `.kroger_token_user.json` - User authorization tokens
+
+These tokens are stored in XDG_DATA_HOME/local/share/kroger-mcp/ on Unix-like machines or APPDATA/kroger-mcp/ on Windows machines.
 
 ### 🔒 Enhanced Security with PKCE
 
