@@ -16,9 +16,9 @@ def get_token_file_path(token_name) -> str:
         This is in response to Issue #13 in kroger-mcp repository.
     """
     if os.name == 'nt': # Windows
-        data_dir = os.environ.get('APPDATA', Path.home)
+        data_dir = os.environ.get('APPDATA', Path.home())
     else: # Unix-like
-        data_dir = os.environ.get('XDG_DATA_HOME', Path.home() / 'local' / 'share')
+        data_dir = os.environ.get('XDG_DATA_HOME', Path.home() / '.local' / 'share')
 
     token_dir = Path(data_dir) / 'kroger-mcp'
     token_dir.mkdir(parents=True, exist_ok=True)
