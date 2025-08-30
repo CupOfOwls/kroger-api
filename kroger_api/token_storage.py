@@ -5,13 +5,29 @@ This module provides functions to save and load OAuth tokens to avoid repeated l
 
 import os
 import json
+from pathlib import Path
 from typing import Dict, Any, Optional
 
 # Default token file location
 TOKEN_FILE = ".kroger_tokens.json"
 
+def get_token_file_path() -> str:
+    """Get the appropriate path for storing the token file using XDG spec.
+        This is in response to Issue #13 in kroger-mcp repository.
+    """
+    if os.name == 'nt': # Windows <-- These guys suck!!!!
+        data_dir = os.environ.get('APPDATA', Path.home)
+    else: # Unix-like
+        data_dir = os.environ.get('XDG_DATA_HOME', Path.home() / 'local' / 'share')
 
-def save_token(token_info: Dict[str, Any], token_file: str = TOKEN_FILE) -> None:
+    token_dir = Path(data_dir) / 'kroger-mcp'
+    token_dir.mkdir(parents=True, exist_ok=True)
+    return str(token_dir / TOKEN_FILE)
+
+
+
+
+def save_token(token_info: Dict[str, Any], token_file: str = None) -> None:
     """
     Save a token to a file.
     
@@ -19,6 +35,10 @@ def save_token(token_info: Dict[str, Any], token_file: str = TOKEN_FILE) -> None
         token_info: The token information returned from the API
         token_file: The file path to save the token to
     """
+
+
+    token_file = get_token_file_path()
+
     # Save to file
     with open(token_file, "w") as f:
         json.dump(token_info, f, indent=2)
@@ -27,7 +47,7 @@ def save_token(token_info: Dict[str, Any], token_file: str = TOKEN_FILE) -> None
     os.chmod(token_file, 0o600)
 
 
-def load_token(token_file: str = TOKEN_FILE) -> Optional[Dict[str, Any]]:
+def load_token(token_file: str = None) -> Optional[Dict[str, Any]]:
     """
     Load a token from a file if it exists.
     
@@ -37,6 +57,9 @@ def load_token(token_file: str = TOKEN_FILE) -> Optional[Dict[str, Any]]:
     Returns:
         The token information or None if not available
     """
+
+    token_file = get_token_file_path()
+
     if not os.path.exists(token_file):
         return None
     
