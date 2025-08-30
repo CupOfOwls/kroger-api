@@ -11,23 +11,23 @@ from typing import Dict, Any, Optional
 # Default token file location
 TOKEN_FILE = ".kroger_tokens.json"
 
-def get_token_file_path() -> str:
+def get_token_file_path(token_name) -> str:
     """Get the appropriate path for storing the token file using XDG spec.
         This is in response to Issue #13 in kroger-mcp repository.
     """
-    if os.name == 'nt': # Windows <-- These guys suck!!!!
+    if os.name == 'nt': # Windows
         data_dir = os.environ.get('APPDATA', Path.home)
     else: # Unix-like
         data_dir = os.environ.get('XDG_DATA_HOME', Path.home() / 'local' / 'share')
 
     token_dir = Path(data_dir) / 'kroger-mcp'
     token_dir.mkdir(parents=True, exist_ok=True)
-    return str(token_dir / TOKEN_FILE)
+    return str(token_dir / token_name)
 
 
 
 
-def save_token(token_info: Dict[str, Any], token_file: str = None) -> None:
+def save_token(token_info: Dict[str, Any], token_file: str = TOKEN_FILE) -> None:
     """
     Save a token to a file.
     
@@ -37,7 +37,7 @@ def save_token(token_info: Dict[str, Any], token_file: str = None) -> None:
     """
 
 
-    token_file = get_token_file_path()
+    token_file = get_token_file_path(token_file)
 
     # Save to file
     with open(token_file, "w") as f:
@@ -47,7 +47,7 @@ def save_token(token_info: Dict[str, Any], token_file: str = None) -> None:
     os.chmod(token_file, 0o600)
 
 
-def load_token(token_file: str = None) -> Optional[Dict[str, Any]]:
+def load_token(token_file: str = TOKEN_FILE) -> Optional[Dict[str, Any]]:
     """
     Load a token from a file if it exists.
     
@@ -58,7 +58,7 @@ def load_token(token_file: str = None) -> Optional[Dict[str, Any]]:
         The token information or None if not available
     """
 
-    token_file = get_token_file_path()
+    token_file = get_token_file_path(token_file)
 
     if not os.path.exists(token_file):
         return None
@@ -81,6 +81,10 @@ def clear_token(token_file: str = TOKEN_FILE) -> None:
     Args:
         token_file: The file path to delete
     """
+
+    token_file = get_token_file_path(token_file)
+
+
     if os.path.exists(token_file):
         os.remove(token_file)
         print("Token file deleted.")
@@ -96,6 +100,9 @@ def get_refresh_token(token_file: str = TOKEN_FILE) -> Optional[str]:
     Returns:
         The refresh token or None if not available
     """
+
+    token_file = get_token_file_path(token_file)
+
     token_info = load_token(token_file)
     
     if token_info and "refresh_token" in token_info:
