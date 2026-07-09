@@ -91,10 +91,9 @@ class KrogerClient:
         Returns:
             The token information
         """
-        # Set the token file for this scope
-        _token_dir = os.environ.get('KROGER_TOKEN_DIR')
-        _token_name = f".kroger_token_client_{scope.replace(':', '_')}.json"
-        self.token_file = os.path.join(_token_dir if _token_dir else os.path.expanduser('~'), _token_name)
+        # Set the token file for this scope (resolved to a writable
+        # directory by token_storage.get_token_file_path)
+        self.token_file = f".kroger_token_client_{scope.replace(':', '_')}.json"
         
         # Try to load an existing token first
         token_info = load_token(self.token_file)

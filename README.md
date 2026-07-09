@@ -112,14 +112,12 @@ This library implements robust, automatic token management:
 Token files (automatically managed):
 - `.kroger_token_client_product.compact.json` - Client credentials tokens
 - `.kroger_token_user.json` - User authorization tokens
-These tokens are stored in:
-```
-XDG_DATA_HOME/local/share/kroger-mcp/ # on Unix-like machines (macOS, Linux)
-```
-or
-```
-APPDATA\kroger-mcp\ # On Windows Machines
-```
+These tokens are stored in the first matching location:
+1. `$KROGER_TOKEN_DIR` — set this environment variable to choose the directory yourself
+2. `$XDG_DATA_HOME/kroger-mcp/` (defaults to `~/.local/share/kroger-mcp/`) on Unix-like machines (macOS, Linux)
+3. `%APPDATA%\kroger-mcp\` on Windows
+
+The directory is shared with the [kroger-mcp](https://github.com/CupOfOwls/kroger-mcp) package so both reuse the same tokens, and it is always writable even when the process is launched with a read-only working directory (e.g. MCP servers under Claude Desktop on Windows).
 
 ### 🔒 Enhanced Security with PKCE
 

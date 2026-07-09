@@ -12,15 +12,26 @@ from typing import Dict, Any, Optional
 TOKEN_FILE = ".kroger_tokens.json"
 
 def get_token_file_path(token_name) -> str:
-    """Get the appropriate path for storing the token file using XDG spec.
-        This is in response to Issue #13 in kroger-mcp repository.
-    """
-    if os.name == 'nt': # Windows
-        data_dir = os.environ.get('APPDATA', Path.home())
-    else: # Unix-like
-        data_dir = os.environ.get('XDG_DATA_HOME', Path.home() / '.local' / 'share')
+    """Get the appropriate path for storing the token file.
 
-    token_dir = Path(data_dir) / 'kroger-mcp'
+    Resolution order:
+      1. If token_name is already an absolute path, use it as-is.
+      2. If KROGER_TOKEN_DIR is set, store the file there.
+      3. Otherwise use the platform data directory (XDG spec on Unix,
+         APPDATA on Windows) under a 'kroger-mcp' subdirectory, which is
+         shared with the kroger-mcp package so both reuse the same tokens.
+    """
+    if os.path.isabs(token_name):
+        return token_name
+
+    env_dir = os.environ.get('KROGER_TOKEN_DIR')
+    if env_dir:
+        token_dir = Path(env_dir).expanduser()
+    elif os.name == 'nt': # Windows
+        token_dir = Path(os.environ.get('APPDATA', Path.home())) / 'kroger-mcp'
+    else: # Unix-like
+        token_dir = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local' / 'share')) / 'kroger-mcp'
+
     token_dir.mkdir(parents=True, exist_ok=True)
     return str(token_dir / token_name)
 
