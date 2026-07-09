@@ -1,3 +1,4 @@
+import sys
 from typing import Dict, Optional, Any
 
 from kroger_api.client import KrogerClient
@@ -104,7 +105,7 @@ class AuthorizationAPI:
                 try:
                     return self.refresh_token(refresh_token)
                 except Exception as e:
-                    print(f"Failed to refresh token: {e}")
+                    print(f"Failed to refresh token: {e}", file=sys.stderr)
         
         # If we couldn't refresh or there was no token, return None
         return None

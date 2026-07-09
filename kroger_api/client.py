@@ -1,3 +1,4 @@
+import sys
 import os
 import base64
 import requests
@@ -104,7 +105,7 @@ class KrogerClient:
                 return token_info
             
             # If token is invalid, get a new one
-            print("Token appears invalid, requesting a new one")
+            print("Token appears invalid, requesting a new one", file=sys.stderr)
             
         # If no valid token exists, get a new one
         token_info = self._get_token(grant_type="client_credentials", scope=scope)
@@ -175,7 +176,7 @@ class KrogerClient:
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 400:
                 # Invalid refresh token
-                print("Invalid refresh token. Please re-authenticate.")
+                print("Invalid refresh token. Please re-authenticate.", file=sys.stderr)
             raise
     
     def test_token(self, token_info: Dict[str, Any]) -> bool:
@@ -211,22 +212,22 @@ class KrogerClient:
                 
                 # If token is invalid and we have a refresh token, try to refresh
                 try:
-                    print("Token validation failed, attempting to refresh")
+                    print("Token validation failed, attempting to refresh", file=sys.stderr)
                     new_token_info = self.refresh_token(token_info["refresh_token"])
                     self.token_info = new_token_info
                     return True
                 except Exception as e:
-                    print(f"Failed to refresh token: {e}")
+                    print(f"Failed to refresh token: {e}", file=sys.stderr)
                     return False
             except Exception:
                 # If the validation request failed, try the refresh token
                 try:
-                    print("Token validation request failed, attempting to refresh")
+                    print("Token validation request failed, attempting to refresh", file=sys.stderr)
                     new_token_info = self.refresh_token(token_info["refresh_token"])
                     self.token_info = new_token_info
                     return True
                 except Exception as e:
-                    print(f"Failed to refresh token: {e}")
+                    print(f"Failed to refresh token: {e}", file=sys.stderr)
                     return False
         else:
             # If we don't have a refresh token, just validate the token directly
@@ -354,7 +355,7 @@ class KrogerClient:
                 
                 # Check if the error is due to an expired or invalid token
                 if error_data.get("error") == "invalid_token":
-                    print("Token is invalid or has expired, attempting to refresh")
+                    print("Token is invalid or has expired, attempting to refresh", file=sys.stderr)
                     
                     # Try to refresh the token if we have a refresh token
                     if self.token_file:
@@ -385,7 +386,7 @@ class KrogerClient:
                                     
                                 return response.json()
                             except Exception as refresh_error:
-                                print(f"Failed to refresh token: {refresh_error}")
+                                print(f"Failed to refresh token: {refresh_error}", file=sys.stderr)
                                 # Re-raise the original error if we couldn't refresh
                 
             # If we couldn't handle the error, re-raise it

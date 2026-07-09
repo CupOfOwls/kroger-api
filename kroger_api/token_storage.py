@@ -3,6 +3,7 @@ Token storage utility for Kroger API client.
 This module provides functions to save and load OAuth tokens to avoid repeated logins.
 """
 
+import sys
 import os
 import json
 from pathlib import Path
@@ -78,10 +79,10 @@ def load_token(token_file: str = TOKEN_FILE) -> Optional[Dict[str, Any]]:
         with open(token_file, "r") as f:
             token_info = json.load(f)
         
-        print(f"Found saved token, will test if it's still valid...")
+        print(f"Found saved token, will test if it's still valid...", file=sys.stderr)
         return token_info
     except (json.JSONDecodeError, IOError) as e:
-        print(f"Error loading token: {e}")
+        print(f"Error loading token: {e}", file=sys.stderr)
         return None
 
 
@@ -98,7 +99,7 @@ def clear_token(token_file: str = TOKEN_FILE) -> None:
 
     if os.path.exists(token_file):
         os.remove(token_file)
-        print("Token file deleted.")
+        print("Token file deleted.", file=sys.stderr)
 
 
 def get_refresh_token(token_file: str = TOKEN_FILE) -> Optional[str]:

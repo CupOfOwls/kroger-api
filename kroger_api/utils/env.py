@@ -71,6 +71,6 @@ def get_zip_code(default: str = "00000") -> str:
     """
     zip_code = os.getenv("KROGER_USER_ZIP_CODE")
     if not zip_code:
-        print(f"KROGER_USER_ZIP_CODE environment variable is not set. Using default: {default}")
+        print(f"KROGER_USER_ZIP_CODE environment variable is not set. Using default: {default}", file=sys.stderr)
         return default
     return zip_code
