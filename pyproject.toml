@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -33,7 +33,7 @@ dependencies = [
     "certifi>=2021.0.0",
     "urllib3>=1.26.0",
 ]
-dynamic = ["version"]
+version = "0.3.0"
 
 [project.optional-dependencies]
 dev = [
@@ -58,4 +58,3 @@ Documentation = "https://developer.kroger.com/documentation/public/"
 [tool.setuptools.packages.find]
 exclude = ["tests*", "docs_kroger_api*", "venv*", "examples*", "assets*"]
 
-[tool.setuptools_scm]

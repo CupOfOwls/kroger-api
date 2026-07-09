@@ -7,8 +7,8 @@ include LICENSE
 # Include requirements
 include requirements.txt
 
-# Include assets (demo videos, images, etc.)
-recursive-include assets *.mp4 *.gif *.png *.jpg *.jpeg
+# Media assets stay on GitHub; don't ship them in the sdist
+recursive-exclude assets *
 
 # Include examples directory but don't package them in the main distribution
 recursive-include examples *.py
