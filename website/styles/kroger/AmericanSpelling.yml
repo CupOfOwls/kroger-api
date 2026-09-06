@@ -1,0 +1,15 @@
+extends: substitution
+message: "Use American spelling: '%s' instead of '%s'."
+level: error
+ignorecase: true
+swap:
+  organise: organize
+  organisation: organization
+  analyse: analyze
+  authorise: authorize
+  behaviour: behavior
+  cancelled: canceled
+  cancelling: canceling
+  colour: color
+  favourite: favorite
+  licence: license

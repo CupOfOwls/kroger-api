@@ -31,3 +31,8 @@ htmlcov/
 
 # Logs
 *.log
+
+# Docs site (website/)
+website/node_modules/
+website/build/
+website/.docusaurus/

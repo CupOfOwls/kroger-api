@@ -1,0 +1,12 @@
+extends: existence
+message: "Cut '%s': if it were, the reader would not need the docs."
+level: warning
+ignorecase: true
+tokens:
+  - simply
+  - just click
+  - it's easy
+  - easily
+  - please note
+  - obviously
+  - of course

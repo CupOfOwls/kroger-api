@@ -1,0 +1,293 @@
+---
+sidebar_position: 1
+title: "Tutorial: Use the Kroger API in Python"
+description: "Register a Kroger developer app, authenticate with OAuth2, find a nearby store, search for a product, and add it to your cart with the kroger-api client."
+---
+
+import Quiz from "@site/src/components/Quiz";
+
+# Tutorial: Use the Kroger API in Python
+
+This tutorial shows you how to register a Kroger developer app, authenticate with OAuth2, and work with the [`kroger-api`](https://github.com/CupOfOwls/kroger-api) Python client.
+
+**What you'll build:** a script that handles credentials, gets a token, finds a nearby store, searches for a product, and adds it to your cart. The tutorial takes about 20 minutes.
+
+## Learning objectives
+
+By the end of this tutorial, you will be able to:
+
+1. **Apply** the OAuth2 client-credentials flow to read public data, and identify when a task requires the user-authorization flow instead.
+1. **Apply** the two-step location→product lookup: resolve a ZIP code to a `locationId`, then run a product search scoped to that store.
+1. **Analyze** a failed API call (missing `location_id`, wrong token type) and identify the root cause from the response.
+1. **Create** a script that chains authentication, location, product, and cart calls into one working task.
+
+:::note Prerequisites
+
+- Python 3.9 or later (run `python3 --version` to check)
+- `pip` or `uv` to install packages
+- A free [Kroger developer account](https://developer.kroger.com/manage/apps/register)
+
+:::
+
+## Step 1: Create a Kroger developer app
+
+1. Sign in at the [Kroger Developer Portal](https://developer.kroger.com/manage/apps/register).
+1. Register a new application.
+1. Note your `CLIENT_ID` and `CLIENT_SECRET`, and set the redirect URI to `http://localhost:8000/callback`.
+
+Your redirect URI is where Kroger sends your browser after you approve cart access in Step 5.
+
+## Step 2: Install kroger-api and set your environment
+
+```bash
+pip install kroger-api
+```
+
+Create a file named `tutorial.py` next to a `.env` file in your working directory. Each step below adds a few lines to `tutorial.py`; rerun the script after each step. The `.env` file holds your credentials:
+
+```bash
+KROGER_CLIENT_ID=your_client_id_here
+KROGER_CLIENT_SECRET=your_client_secret_here
+KROGER_REDIRECT_URI=http://localhost:8000/callback
+KROGER_USER_ZIP_CODE=10001
+```
+
+Enter your own ZIP code to see stores in your area.
+
+## Step 3: Get your first access token
+
+Public data like stores and products uses the client-credentials flow. Your app exchanges its ID and secret for a token without needing a user to sign in.
+
+```python
+from kroger_api import KrogerAPI
+from kroger_api.utils.env import load_and_validate_env
+
+load_and_validate_env(["KROGER_CLIENT_ID", "KROGER_CLIENT_SECRET"])
+
+kroger = KrogerAPI()
+token_info = kroger.authorization.get_token_with_client_credentials("product.compact")
+print(token_info["expires_in"], "seconds until this token expires")
+```
+
+Run the script. You should see a number around `1800`. The token is valid for 30 minutes.
+
+<Quiz
+  title="Knowledge check 1"
+  question={
+    <>
+      Your script reads a signed-in user's cart. First, request a token with{" "}
+      <code>get_token_with_client_credentials</code>, then call the cart
+      endpoint. What happens?
+    </>
+  }
+  options={[
+    {
+      label: "It works: a token is a token.",
+      feedback: (
+        <>
+          The call returns <code>403 Forbidden</code>. The cart belongs to a
+          person. A client-credentials token only proves that your app is
+          authenticated. Kroger does not know which user's cart you mean, so the
+          request is refused. Retrying with this token type will not change the
+          result.
+        </>
+      ),
+    },
+    {
+      label: "The token expired.",
+      feedback: (
+        <>
+          The token is 30 minutes old at most, so expiry is not the cause. Even
+          a new client-credentials token will trigger the same <code>401</code>.
+          The failure is due to the specific data you are requesting.
+        </>
+      ),
+    },
+    {
+      label: "It fails, because cart access requires a user-authorized token.",
+      correct: true,
+      feedback: (
+        <>
+          Cart and profile endpoints need the authorization-code flow (Step 5).
+          A user must sign in and grant your app the{" "}
+          <code>cart.basic:write</code> scope. Client credentials only allow
+          access to public catalog data.
+        </>
+      ),
+    },
+  ]}
+/>
+
+## Step 4: Find a nearby store and search its inventory
+
+Product prices and availability vary by store. To get this data, the Products API requires a store identifier. First, you look up the `locationId` using a ZIP code, then you use that identifier for your product search.
+
+```python
+from kroger_api.utils.env import get_zip_code
+
+zip_code = get_zip_code(default="10001")  # reads KROGER_USER_ZIP_CODE from .env
+
+locations = kroger.location.search_locations(
+    zip_code=zip_code,
+    radius_in_miles=10,
+    limit=1,
+)
+location_id = locations["data"][0]["locationId"]
+print("Nearest store:", locations["data"][0]["name"])
+
+products = kroger.product.search_products(
+    term="milk",
+    location_id=location_id,
+    limit=5,
+)
+for product in products["data"]:
+    price = product["items"][0].get("price", {}).get("regular", "n/a")
+    print(product["description"], price)
+```
+
+You should see the name of the nearest Kroger-family store, then five milk products they carry with their prices. Price data only appears because the search included a `location_id`; prices exist relative to a store.
+
+<Quiz
+  title="Knowledge check 2"
+  question={
+    <>
+      You call <code>search_products(term="milk")</code> without a{" "}
+      <code>location_id</code>. What comes back?
+    </>
+  }
+  options={[
+    {
+      label: "An error: location_id is required.",
+      feedback: <>No error occurs. The call succeeds, which is the trap.</>,
+    },
+    {
+      label: "Results, but without store-specific pricing or availability.",
+      correct: true,
+      feedback: (
+        <>
+          The response looks fine initially, but items lack price data and aisle
+          locations. Prices only exist relative to a store. A script that runs
+          without these details provides no useful information. Scope every
+          product search to a <code>locationId</code>.
+        </>
+      ),
+    },
+    {
+      label: "Products from a default store near the API's data center.",
+      feedback: (
+        <>
+          No default store is used. Results are unanchored, so store-dependent
+          fields are absent from catalog entries.
+        </>
+      ),
+    },
+  ]}
+/>
+
+## Step 5: Authenticate as a user
+
+Adding items to a cart acts on a real user account, so this step opens your browser once for approval.
+
+```python
+from kroger_api.auth import authenticate_user
+
+kroger = authenticate_user(scopes="cart.basic:write")
+```
+
+Your browser will open the Kroger sign-in page. Sign in and approve access. The library's local callback server, using the redirect URI from Step 1, catches the response and stores the token. It will reuse this token in future runs.
+
+## Step 6: Add the product to your cart
+
+Add the first product from Step 4 to your cart:
+
+```python
+first_item = products["data"][0]
+kroger.cart.add_to_cart([
+    {
+        "upc": first_item["upc"],
+        "quantity": 1,
+        "modality": "PICKUP",
+    }
+])
+print("Added to cart:", first_item["description"])
+```
+
+<Quiz
+  title="Knowledge check 3"
+  question={
+    <>
+      Your script ran for 50 minutes and a cart call now fails with an
+      authentication error. Which response is correct?
+    </>
+  }
+  options={[
+    {
+      label: "Call the library's token refresh.",
+      correct: true,
+      feedback: (
+        <>
+          The stored token includes a refresh token, and kroger-api even
+          attempts this refresh automatically when a call fails. An error that
+          still surfaces usually means the refresh token is missing or stale, so
+          refresh (or re-authenticate) explicitly. The refresh-tokens guide
+          under Next steps covers this.
+        </>
+      ),
+    },
+    {
+      label:
+        "Redo the OAuth process from scratch, including the browser window.",
+      feedback: (
+        <>
+          This works eventually. It requires whoever is at the keyboard to
+          re-approve access they already granted. If you do this in a scheduled
+          job, there is no one at the keyboard: the library waits two minutes
+          for a browser that nobody sees, then raises a timeout error.
+        </>
+      ),
+    },
+    {
+      label: "Retry the same request unchanged.",
+      feedback: (
+        <>
+          The second failure is identical to the first, and the third is the
+          same. The token has expired. Retrying will not change that.
+        </>
+      ),
+    },
+  ]}
+/>
+
+## Checkpoint: verify what you built
+
+Verify your work outside of the script. Sign in at kroger.com and check your cart. The item from Step 6 should be there.
+
+## Capstone: price-watching script
+
+Your friend wants to buy a specific product only when the price drops below a target amount at their closest store. Using what you built in this tutorial, write a script that:
+
+1. Resolves the ZIP code to the nearest store.
+1. Looks up the current price of the product at that location.
+1. Adds the item to the cart if the price is below the threshold. The system prints a message regardless of the outcome.
+
+This chain handles four objectives: both authentication flows, the location-to-product lookup, price extraction, and the conditional cart write. If your script adds the item every time, check knowledge check 2. You are likely reading a priceless or unanchored product result.
+
+## Next steps
+
+**How-to guides:**
+
+- [Choose an auth flow](../how-to/choose-an-auth-flow.md)
+- [Refresh tokens automatically](../how-to/refresh-tokens.md)
+- [Handle rate limits and pagination](../how-to/handle-rate-limits.md)
+
+**Reference:**
+
+- [Glossary of Kroger API terms](../reference/glossary.md)
+
+**Explanation:**
+
+- [How kroger-api models the Kroger Public API](../concepts/client-architecture.md)
+
+**Building AI agents:**
+
+- [Lab: Build an AI agent with kroger-mcp](../building-ai-agents/agent-lab.mdx): give an AI assistant these capabilities using the Model Context Protocol.

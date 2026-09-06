@@ -1,0 +1,10 @@
+extends: existence
+message: "Internal doc links need the .md or .mdx extension and a relative path."
+level: warning
+scope: raw
+nonword: true
+# Matches markdown links to a relative docs path without a .md/.mdx extension,
+# e.g. ](../how-to/refresh-tokens) — Docusaurus resolves them, but they
+# break markdown preview on GitHub and the llms.txt export.
+tokens:
+  - '\]\((\.\.?/)(?![^)]*\.mdx?[)#])[^)]*\)'

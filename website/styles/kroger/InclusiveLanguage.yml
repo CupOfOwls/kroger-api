@@ -1,0 +1,11 @@
+extends: substitution
+message: "Use inclusive language: '%s' instead of '%s'."
+level: error
+ignorecase: true
+swap:
+  whitelist: allowlist
+  blacklist: blocklist
+  "master branch": main branch
+  "he or she": they
+  "his or her": their
+  sanity check: quick check

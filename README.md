@@ -2,6 +2,8 @@
 
 A comprehensive Python client library for the Kroger Public API, featuring robust token management, comprehensive examples, and easy-to-use interfaces for all available endpoints.
 
+📚 **Docs:** https://cupofowls.github.io/kroger-api/ — tutorials, how-to guides, concepts, and the full reference.
+
 ## 📺 Demo
 
 Adding an item to your cart via an interactive Python script, and checking that it appears in your account:
