@@ -16,13 +16,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Lints only lines added in this PR and comments inline on the diff.
-      # Advisory by design: a human decides, but decides visibly.
-      - uses: errata-ai/vale-action@518a9136acc6e6668ce7c00d367051e0941e87ff # v3.0.0
-        with:
-          workdir: website
-          filter_mode: added
-          reporter: github-pr-review
+      # Vale runs advisory (never fails the build); findings appear in the log.
+      # Styles are local to styles/kroger, so no package sync is needed.
+      - name: Vale prose lint (advisory)
+        working-directory: website
+        run: |
+          curl -sfL "https://github.com/errata-ai/vale/releases/download/v3.20.0/vale_3.20.0_Linux_64-bit.tar.gz" -o /tmp/vale.tgz
+          tar -xzf /tmp/vale.tgz -C /tmp vale
+          /tmp/vale docs/ || true
 
   prettier:
     name: Prettier format check
