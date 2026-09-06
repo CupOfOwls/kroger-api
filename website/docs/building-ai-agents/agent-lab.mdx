@@ -1,0 +1,251 @@
+---
+sidebar_position: 1
+title: "Lab: Build an AI agent with kroger-mcp"
+description: "Connect an AI assistant to the kroger-mcp server, give it real grocery tasks, and learn to diagnose agent behavior from its tool-call trace."
+---
+
+import Quiz from "@site/src/components/Quiz";
+
+# Lab: Build an AI agent with kroger-mcp
+
+In this lab, you will connect an AI assistant to [`kroger-mcp`](https://github.com/CupOfOwls/kroger-mcp), a Model Context Protocol server that exposes Kroger store, product, and cart operations as tools.
+
+**What you'll build:** by the end, your AI assistant will find a nearby Kroger, search for products, and add items to your cart. You will approve each step and can use the trace to see why the assistant took those actions.
+
+## Learning objectives
+
+You will be able to:
+
+1. **Apply** the MCP server configuration to connect kroger-mcp to an agent client.
+1. **Analyze** a natural-language grocery request to decide which tools the agent should call and the order to use them.
+1. **Evaluate** an agent's tool-call trace to see if a wrong or missing tool call led to an incorrect answer.
+1. **Create** a multi-step task that requires the agent to chain two or more tools.
+
+:::note Prerequisites
+
+- An MCP-capable client: Claude Desktop or Claude Code
+- [`uv`](https://docs.astral.sh/uv/) installed (run `uvx --version` to check)
+- Kroger developer credentials. If you need these, complete [Step 1 of the API tutorial](../get-started/use-the-kroger-api.mdx) first
+
+:::
+
+## What is an MCP server?
+
+The Model Context Protocol (MCP) is an open standard that allows AI applications to call external tools. A server like kroger-mcp declares available tools, such as searching stores, searching products, or managing a cart. The client presents these tools to the model, which then decides when to use them. You approve each call before it executes. For more depth, see the [MCP documentation](https://modelcontextprotocol.io/).
+
+### Choosing an MCP client
+
+This lab uses Claude Desktop or Claude Code, but any MCP-capable client works. kroger-mcp runs as a local (stdio) server, so pick a client that can run a local server. Each client's setup differs; see its docs for how to add one:
+
+| Client          | How to add an MCP server                                                                                                                        |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Desktop  | [Local MCP servers on Claude Desktop](https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop) |
+| Claude Code     | [Connect Claude Code to tools via MCP](https://code.claude.com/docs/en/mcp)                                                                     |
+| ChatGPT Desktop | [Developer mode](https://platform.openai.com/docs/guides/developer-mode) (remote MCP servers only; needs a Plus or Pro plan)                    |
+| OpenAI Codex    | [Extend Codex with MCP](https://developers.openai.com/codex/extend/mcp)                                                                         |
+| Antigravity CLI | [MCP in Antigravity](https://antigravity.google/docs/cli/mcp)                                                                                   |
+| OpenCode        | [MCP servers](https://opencode.ai/docs/mcp-servers/)                                                                                            |
+| Charm Crush     | [MCPs](https://github.com/charmbracelet/crush#mcps)                                                                                             |
+
+ChatGPT Desktop connects only to remote (HTTP) MCP servers, so it cannot run a local kroger-mcp directly.
+
+## Step 1: Install and configure kroger-mcp
+
+Edit your client's MCP configuration file. If you use Claude Desktop:
+
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Linux**: `~/.config/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
+
+If you use Claude Code, register the server with one command instead (fill in your values), then skip the JSON block below:
+
+```bash
+claude mcp add-json kroger '{"command":"uvx","args":["kroger-mcp"],"env":{"KROGER_CLIENT_ID":"your_client_id","KROGER_CLIENT_SECRET":"your_client_secret","KROGER_REDIRECT_URI":"http://localhost:8000/callback","KROGER_USER_ZIP_CODE":"10001"}}'
+```
+
+```json
+{
+  "mcpServers": {
+    "kroger": {
+      "command": "uvx",
+      "args": ["kroger-mcp"],
+      "env": {
+        "KROGER_CLIENT_ID": "your_client_id",
+        "KROGER_CLIENT_SECRET": "your_client_secret",
+        "KROGER_REDIRECT_URI": "http://localhost:8000/callback",
+        "KROGER_USER_ZIP_CODE": "10001"
+      }
+    }
+  }
+}
+```
+
+| Key                                         | What it does                                                                                                                                    |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `command` + `args`                          | Runs `uvx kroger-mcp`: uv fetches the package from PyPI into an isolated environment and starts the server, with no repository clone to manage. |
+| `KROGER_CLIENT_ID` / `KROGER_CLIENT_SECRET` | Your app credentials from the Kroger Developer Portal. The _server_ holds these; the model never sees them.                                     |
+| `KROGER_REDIRECT_URI`                       | Where the one-time browser approval lands during user authentication.                                                                           |
+| `KROGER_USER_ZIP_CODE`                      | The default ZIP for "near me" store searches.                                                                                                   |
+
+:::warning Security consideration
+
+This configuration allows any agent in this client to read your local stores and products. Once you approve the calls, agents can also modify your real Kroger cart. Because the credentials are stored in a plain-text config file, keep the file private. Use a dedicated developer app instead of reusing production credentials.
+
+:::
+
+## Step 2: Restart the client and confirm the connection
+
+Restart Claude Desktop, or start a new Claude Code session. Open the tools listing in the client UI. You should see the `kroger` server and its tool families from the [tool reference](../reference/mcp-tools.md): location, product, cart, information, profile, authentication, and utility tools.
+
+To verify the server without an agent, use MCP Inspector to connect to it directly:
+
+```bash
+npx @modelcontextprotocol/inspector uvx kroger-mcp
+```
+
+If the Inspector shows a tools list but your client does not, check your client configuration. If there is no tools list anywhere, check the server's stderr for a startup error, then verify that `KROGER_CLIENT_ID` and `KROGER_CLIENT_SECRET` are set correctly.
+
+## Step 3: Give the agent tasks
+
+Enter these prompts one by one:
+
+1. _"Find the Kroger closest to ZIP 10001."_ (location tools)
+1. _"Search that store for oat milk."_ (product tools)
+1. _"Add two cartons of the cheapest one to my cart."_ (cart tools)
+
+The first cart operation needs a user-authorized token, and the server cannot open a browser for you. Instead, the agent calls `start_authentication`, which returns a Kroger sign-in link. Open the link, approve access, and copy the URL Kroger redirects you to. Give that URL back to the agent, and it finishes the flow with `complete_authentication`. This grants the same `cart.basic:write` scope as [Step 5 of the API tutorial](../get-started/use-the-kroger-api.mdx), through an exchange built for chat instead of a local callback server.
+
+<Quiz
+  title="Knowledge check 1"
+  question={
+    <>
+      You ask "what time does that store close tonight?" and the agent answers
+      "that store closes at 9pm." The trace shows no tool call was made. Is the
+      answer trustworthy?
+    </>
+  }
+  options={[
+    {
+      label: "Yes, the model knows common store hours.",
+      feedback: (
+        <>
+          Watch what happens on a holiday. The model produces a plausible hour
+          based on general training data about grocery stores. Your store's
+          actual Tuesday hours are not used. The answer looks identical to a
+          grounded one, which is why it is dangerous.
+        </>
+      ),
+    },
+    {
+      label: "It depends on the model's knowledge cutoff.",
+      feedback: (
+        <>
+          Cutoff does not matter. Even a model trained yesterday cannot know a
+          store's hours without using the tool. The real distinction is grounded
+          versus ungrounded, not fresh versus stale.
+        </>
+      ),
+    },
+    {
+      label:
+        "No: a grounded answer requires a location tool call, and none happened.",
+      correct: true,
+      feedback: (
+        <>
+          Deciding whether a tool should have fired is the most important skill
+          when working with agents. Since store hours are in the location
+          details tool, any answer provided without that call is a guess.
+        </>
+      ),
+    },
+  ]}
+/>
+
+## Step 4: Understanding user approvals
+
+By default, each tool call pauses for your approval before it runs, so you can read what the agent wants to do and allow or deny it. (Clients let you mark a tool as always allowed; leave that off for this lab.)
+
+Approve read-only location and product searches freely; give cart writes more attention, since they change a real account. Denying a call is not an error: the agent sees the denial and re-plans (see [How MCP approval and scopes work](../concepts/mcp-approval.md)).
+
+<Quiz
+  title="Knowledge check 2"
+  question={
+    <>
+      A user asks: "Find me the cheapest milk near me." Which plan should the
+      agent follow?
+    </>
+  }
+  options={[
+    {
+      label:
+        "Resolve the ZIP to a few nearby stores, search for milk at each, and report the cheapest across them. No cart call.",
+      correct: true,
+      feedback: (
+        <>
+          "Cheapest" and "near me" together mean comparing a few nearby stores,
+          not just the single closest one, since a store slightly farther may be
+          cheaper. Each product search still needs its own{" "}
+          <code>location_id</code> to return prices, and the answer stops at
+          reporting: the user asked to find, not to buy.
+        </>
+      ),
+    },
+    {
+      label: "Search for milk, sort by price, then look up the store.",
+      feedback: (
+        <>
+          Without an explicit <code>location_id</code>, the server does not run
+          a store-free search. It falls back to a preferred store if one is set
+          (which may not be the user's "near me"), or returns an error if none
+          is. Either way, price only exists relative to a store, so the location
+          must be resolved first.
+        </>
+      ),
+    },
+    {
+      label:
+        "Resolve the location, search for milk, and add the cheapest to the cart.",
+      feedback: (
+        <>
+          The first two calls are right, but the cart write exceeds the request.
+          The user wants to know the price, not to purchase. This is precisely
+          the class of action the approval prompt exists to catch, and you would
+          deny it.
+        </>
+      ),
+    },
+  ]}
+/>
+
+## Checkpoint: verify outside the chat
+
+Ask the agent: _"What's in my cart right now?"_ Check the same list in the Kroger app or on kroger.com. The two should match. Build the habit of verifying through a second, independent source instead of relying on the agent's claims.
+
+## Capstone: the taco-night task
+
+Send this to the agent in a single message:
+
+```text
+I'm having 6 people over Friday for tacos. Check if my usual store has enough ground beef and add any missing items to my cart.
+```
+
+Set expectations before sending. Decide which tools should trigger, the order they follow, and when the agent should ask for clarification instead of making assumptions. For example, the agent might need to ask how much beef is sufficient for 6 people or which store is your usual.
+
+Send the task, approve the calls, and compare the actual trace with your prediction.
+
+**Part two: break it on purpose.** First ask the agent to clear any preferred store it has saved (the server persists one via `set_preferred_location`). Then change `KROGER_USER_ZIP_CODE` in the config to a ZIP code from another state, restart the client, and send the same task. Watch whether the agent resolves "my usual store" to a location where this user has never shopped. When it does, every subsequent call inherits that wrong anchor while each call looks correct on its own. Use the trace to find where the failure entered, then restore your actual ZIP code.
+
+## Next steps
+
+**Reference:**
+
+- [Full kroger-mcp tool list](../reference/mcp-tools.md)
+
+**Explanation:**
+
+- [How MCP approval and scopes work](../concepts/mcp-approval.md)
+
+**How-to guides:**
+
+- [Choose an auth flow](../how-to/choose-an-auth-flow.md)
+- [Handle rate limits and pagination](../how-to/handle-rate-limits.md)

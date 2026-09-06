@@ -1,0 +1,17 @@
+extends: substitution
+message: "Inconsistent terminology: use '%s' instead of '%s'."
+level: error
+ignorecase: false
+# The project glossary, machine-enforced. Source of truth:
+# docs/contributing/style-guide.md "Terminology" table.
+swap:
+  Oauth: OAuth
+  oauth2: OAuth2
+  "Kroger api": Kroger API
+  ratelimit: rate limit
+  "rate-limit(?!ed|ing)": rate limit
+  zipcode: ZIP code
+  "zip code": ZIP code
+  "Zip code": ZIP code
+  "Access Token": access token
+  "Client Credentials(?! Flow)": client credentials

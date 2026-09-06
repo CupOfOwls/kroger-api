@@ -1,0 +1,74 @@
+.quiz {
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: var(--ifm-global-radius);
+  padding: 1rem 1.25rem;
+  margin: 1.5rem 0;
+  background: var(--ifm-background-surface-color);
+}
+
+.title {
+  font-weight: 700;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ifm-color-emphasis-600);
+  margin-bottom: 0.5rem;
+}
+
+.question {
+  margin-bottom: 1rem;
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.option {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: var(--ifm-global-radius);
+  background: var(--ifm-background-color);
+  color: var(--ifm-font-color-base);
+  font: inherit;
+  cursor: pointer;
+}
+
+.option:hover {
+  border-color: var(--ifm-color-primary);
+}
+
+.optionLetter {
+  font-weight: 700;
+  color: var(--ifm-color-emphasis-600);
+}
+
+.correct {
+  border-color: var(--ifm-color-success);
+  background: var(--ifm-color-success-contrast-background);
+}
+
+.incorrect {
+  border-color: var(--ifm-color-warning);
+  background: var(--ifm-color-warning-contrast-background);
+}
+
+.feedback {
+  margin: 0.35rem 0 0.25rem;
+  padding: 0.6rem 0.9rem;
+  border-left: 3px solid var(--ifm-color-warning);
+  background: var(--ifm-color-warning-contrast-background);
+  border-radius: 0 var(--ifm-global-radius) var(--ifm-global-radius) 0;
+  font-size: 0.95rem;
+}
+
+.feedbackCorrect {
+  border-left-color: var(--ifm-color-success);
+  background: var(--ifm-color-success-contrast-background);
+}

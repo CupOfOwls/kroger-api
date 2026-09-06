@@ -1,0 +1,37 @@
+name: Docs lint
+
+on:
+  pull_request:
+    paths:
+      - "website/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  vale:
+    name: Vale prose lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Lints only lines added in this PR and comments inline on the diff.
+      # Advisory by design: a human decides, but decides visibly.
+      - uses: errata-ai/vale-action@518a9136acc6e6668ce7c00d367051e0941e87ff # v3.0.0
+        with:
+          workdir: website
+          filter_mode: added
+          reporter: github-pr-review
+
+  prettier:
+    name: Prettier format check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check formatting
+        working-directory: website
+        run: npx --yes prettier --check "docs/**/*.{md,mdx}" "*.js" "styles/**/*.yml" "src/**/*.{js,css}"
