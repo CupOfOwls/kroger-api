@@ -27,6 +27,8 @@ if (ExecutionEnvironment.canUseDOM) {
       cookieless_mode: "always", // server-side daily hash; nothing stored on device
       capture_pageview: false, // fired manually on route change (single source)
       disable_session_recording: true, // never record docs readers
+      autocapture: false, // no noisy per-click $autocapture events
+      capture_heatmaps: true, // aggregate click/rage/dead-click heatmaps (cookieless-compatible)
       respect_dnt: true,
     });
   }
