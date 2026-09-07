@@ -2,6 +2,17 @@ import React, { useState } from "react";
 import posthog from "posthog-js";
 import styles from "./styles.module.css";
 
+// MDX passes `question`/`label` as JSX nodes (they can contain inline <code>).
+// Flatten to plain text so analytics carries readable strings, not element trees.
+function nodeToText(node) {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeToText).join("");
+  if (node.props && node.props.children != null)
+    return nodeToText(node.props.children);
+  return "";
+}
+
 /**
  * A small formative-assessment widget: the reader commits to an answer
  * before seeing any feedback. Feedback narrates the consequence of the
@@ -41,8 +52,8 @@ export default function Quiz({ title, question, options }) {
                   setSelected(i);
                   if (typeof window !== "undefined" && posthog.__loaded) {
                     posthog.capture("quiz_answer", {
-                      question,
-                      choice: opt.label,
+                      question: nodeToText(question),
+                      choice: nodeToText(opt.label),
                       correct: !!opt.correct,
                     });
                   }
