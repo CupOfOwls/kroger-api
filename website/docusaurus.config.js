@@ -18,6 +18,15 @@ const config = {
   projectName: "kroger-api",
   trailingSlash: false,
 
+  // PostHog product analytics (cookieless — see src/posthog.js). The phc_ token
+  // is a PUBLIC, write-only ingest key: safe to commit, cannot read data back.
+  // The phx_ personal key is never in this repo.
+  customFields: {
+    posthogKey: "phc_pAuypv8nhRgxNcGBRkSyL8eBC2inBrJv5NtYp3GxKZnR",
+    posthogHost: "https://us.i.posthog.com",
+  },
+  clientModules: [require.resolve("./src/posthog.js")],
+
   // A broken internal link is a build failure, not a warning.
   onBrokenLinks: "throw",
   onBrokenMarkdownLinks: "throw",
@@ -121,6 +130,10 @@ const config = {
               {
                 label: "Kroger Developer Portal",
                 href: "https://developer.kroger.com/",
+              },
+              {
+                label: "Analytics & privacy",
+                to: "/analytics-and-privacy",
               },
             ],
           },

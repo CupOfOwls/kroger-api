@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import posthog from "posthog-js";
 import styles from "./styles.module.css";
 
 /**
@@ -36,7 +37,16 @@ export default function Quiz({ title, question, options }) {
               <button
                 type="button"
                 className={`${styles.option} ${stateClass}`}
-                onClick={() => setSelected(i)}
+                onClick={() => {
+                  setSelected(i);
+                  if (typeof window !== "undefined" && posthog.__loaded) {
+                    posthog.capture("quiz_answer", {
+                      question,
+                      choice: opt.label,
+                      correct: !!opt.correct,
+                    });
+                  }
+                }}
                 aria-pressed={isSelected}
               >
                 <span className={styles.optionLetter} aria-hidden="true">
