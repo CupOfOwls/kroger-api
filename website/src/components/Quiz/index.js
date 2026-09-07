@@ -55,6 +55,7 @@ export default function Quiz({ title, question, options }) {
                       question: nodeToText(question),
                       choice: nodeToText(opt.label),
                       correct: !!opt.correct,
+                      result: opt.correct ? "correct" : "incorrect",
                     });
                   }
                 }}
