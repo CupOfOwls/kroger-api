@@ -3,14 +3,21 @@ Token storage utility for Kroger API client.
 This module provides functions to save and load OAuth tokens to avoid repeated logins.
 """
 
-import sys
-import os
 import json
+import logging
+import os
+import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+logger = logging.getLogger(__name__)
+
 # Default token file location
 TOKEN_FILE = ".kroger_tokens.json"
+
+# File that user (authorization-code) tokens are saved to. kroger-mcp reads
+# the same file.
+USER_TOKEN_FILE = ".kroger_token_user.json"
 
 def get_token_file_path(token_name) -> str:
     """Get the appropriate path for storing the token file.
@@ -42,21 +49,29 @@ def get_token_file_path(token_name) -> str:
 def save_token(token_info: Dict[str, Any], token_file: str = TOKEN_FILE) -> None:
     """
     Save a token to a file.
+
+    The token is written to a temporary file that only the owner can read
+    (mode 600 from the start), which then replaces the old file. A reader,
+    such as another process that shares the token, never sees a
+    half-written file.
     
     Args:
         token_info: The token information returned from the API
         token_file: The file path to save the token to
     """
-
-
     token_file = get_token_file_path(token_file)
 
-    # Save to file
-    with open(token_file, "w") as f:
-        json.dump(token_info, f, indent=2)
-    
-    # Set file permissions to 600 (only owner can read/write)
-    os.chmod(token_file, 0o600)
+    fd, temp_path = tempfile.mkstemp(dir=os.path.dirname(token_file), prefix=".tmp-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(token_info, f, indent=2)
+        os.replace(temp_path, token_file)
+    except BaseException:
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+        raise
 
 
 def load_token(token_file: str = TOKEN_FILE) -> Optional[Dict[str, Any]]:
@@ -69,7 +84,6 @@ def load_token(token_file: str = TOKEN_FILE) -> Optional[Dict[str, Any]]:
     Returns:
         The token information or None if not available
     """
-
     token_file = get_token_file_path(token_file)
 
     if not os.path.exists(token_file):
@@ -88,10 +102,9 @@ def load_token(token_file: str = TOKEN_FILE) -> Optional[Dict[str, Any]]:
             except (OSError, TypeError, ValueError):
                 pass
 
-        print(f"Found saved token, will test if it's still valid...", file=sys.stderr)
         return token_info
     except (json.JSONDecodeError, IOError) as e:
-        print(f"Error loading token: {e}", file=sys.stderr)
+        logger.warning("Could not load the token file %s: %s", token_file, e)
         return None
 
 
@@ -102,13 +115,11 @@ def clear_token(token_file: str = TOKEN_FILE) -> None:
     Args:
         token_file: The file path to delete
     """
-
     token_file = get_token_file_path(token_file)
-
 
     if os.path.exists(token_file):
         os.remove(token_file)
-        print("Token file deleted.", file=sys.stderr)
+        logger.info("Deleted the token file %s", token_file)
 
 
 def get_refresh_token(token_file: str = TOKEN_FILE) -> Optional[str]:
@@ -121,9 +132,6 @@ def get_refresh_token(token_file: str = TOKEN_FILE) -> Optional[str]:
     Returns:
         The refresh token or None if not available
     """
-
-    token_file = get_token_file_path(token_file)
-
     token_info = load_token(token_file)
     
     if token_info and "refresh_token" in token_info:

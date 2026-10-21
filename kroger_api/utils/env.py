@@ -2,12 +2,29 @@
 Environment variable utilities for Kroger API client.
 This module provides functions to load and validate environment variables.
 """
+import logging
 import os
-import sys
-from typing import List, Dict, Optional
-from dotenv import load_dotenv
+from typing import List, Dict
+from dotenv import find_dotenv, load_dotenv
 
 from kroger_api.errors import ConfigurationError
+
+logger = logging.getLogger(__name__)
+
+
+def load_env_file() -> None:
+    """
+    Load settings from a .env file in the working directory, if there is one
+
+    Variables that are already set in the environment keep their values.
+    The search starts in the working directory, not in the directory of the
+    code that calls this, so a .env file next to an installed package or in
+    a parent of the source tree is not read by accident.
+    """
+    path = find_dotenv(usecwd=True)
+    if path:
+        load_dotenv(path)
+
 
 def load_and_validate_env(required_vars: List[str]) -> Dict[str, str]:
     """
@@ -23,8 +40,7 @@ def load_and_validate_env(required_vars: List[str]) -> Dict[str, str]:
         ConfigurationError: If any required environment variables are missing
             (a ValueError subclass)
     """
-    # Load environment variables from .env file
-    load_dotenv()
+    load_env_file()
     
     # Check if required environment variables are set
     missing_vars = []
@@ -74,6 +90,6 @@ def get_zip_code(default: str = "00000") -> str:
     """
     zip_code = os.getenv("KROGER_USER_ZIP_CODE")
     if not zip_code:
-        print(f"KROGER_USER_ZIP_CODE environment variable is not set. Using default: {default}", file=sys.stderr)
+        logger.info("KROGER_USER_ZIP_CODE is not set; using %s", default)
         return default
     return zip_code

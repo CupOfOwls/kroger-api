@@ -18,6 +18,9 @@ from typing import Any, Dict, List
 
 from kroger_api.errors import InvalidParameterError
 
+# Anchored so that JSON Schema and pydantic, which search for a match, check
+# the whole value too. Python code matches them with re.fullmatch, because
+# re.match lets "$" match before a trailing newline.
 LOCATION_ID_PATTERN = r"^[A-Za-z0-9]{8}$"
 PRODUCT_ID_PATTERN = r"^[0-9]{13}$"
 DEPARTMENT_ID_PATTERN = r"^[A-Za-z0-9]{2}$"
@@ -57,7 +60,7 @@ def check_pattern(param: str, value: Any, pattern: str, description: str) -> str
     """Return value as a str that matches pattern. Integers are converted to str first."""
     if isinstance(value, int) and not isinstance(value, bool):
         value = str(value)
-    if not isinstance(value, str) or not re.match(pattern, value):
+    if not isinstance(value, str) or not re.fullmatch(pattern, value):
         raise InvalidParameterError(param, value, f"must be {description}")
     return value
 
@@ -67,7 +70,7 @@ def check_list(param: str, value: Any, pattern: str, description: str) -> str:
     if not isinstance(value, str) or not value:
         raise InvalidParameterError(param, value, f"must be a comma-separated list of {description}")
     for item in value.split(","):
-        if not re.match(pattern, item):
+        if not re.fullmatch(pattern, item):
             raise InvalidParameterError(
                 param, value, f"must be a comma-separated list of {description}; {item!r} is not"
             )
@@ -168,8 +171,8 @@ def lat_long(value: Any, param: str = "lat_long") -> str:
 
 
 def cart_items(items: Any, param: str = "items") -> List[Dict[str, Any]]:
-    """Validate the item list for PUT /v1/cart/add."""
-    if not isinstance(items, list) or not items:
+    """Validate the item list for PUT /v1/cart/add, and return it as a list."""
+    if not isinstance(items, (list, tuple)) or not items:
         raise InvalidParameterError(param, items, "must be a non-empty list of {'upc', 'quantity', 'modality'} dicts")
     for index, item in enumerate(items):
         where = f"{param}[{index}]"
@@ -188,4 +191,4 @@ def cart_items(items: Any, param: str = "items") -> List[Dict[str, Any]]:
             raise InvalidParameterError(f"{where}.quantity", quantity, "must be an integer of 1 or more")
         if item.get("modality") is not None:
             modality(item["modality"], f"{where}.modality")
-    return items
+    return list(items)

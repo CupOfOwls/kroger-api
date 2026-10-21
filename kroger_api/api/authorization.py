@@ -1,9 +1,11 @@
-import sys
+import logging
 from typing import Dict, Optional, Any
 
 from kroger_api.client import KrogerClient
 from kroger_api.errors import BadRequestError
-from kroger_api.token_storage import get_refresh_token, load_token
+from kroger_api.token_storage import USER_TOKEN_FILE, get_refresh_token, load_token
+
+logger = logging.getLogger(__name__)
 
 
 class AuthorizationAPI:
@@ -88,12 +90,7 @@ class AuthorizationAPI:
             KrogerAPIError: If refreshing fails for another reason than a
                 rejected refresh token, such as a network error
         """
-        # Determine which token file to use
-        if token_file is None:
-            if self.client.token_file:
-                token_file = self.client.token_file
-            else:
-                token_file = ".kroger_token_user.json"
+        token_file = token_file or self.client.token_file or USER_TOKEN_FILE
         
         # Load the token
         token_info = load_token(token_file)
@@ -113,6 +110,5 @@ class AuthorizationAPI:
             return None
         try:
             return self.refresh_token(refresh_token)
-        except BadRequestError as e:
-            print(f"Failed to refresh token: {e}", file=sys.stderr)
+        except BadRequestError:
             return None

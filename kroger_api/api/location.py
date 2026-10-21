@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Any, List, Union
+from typing import Dict, Optional, Any
 from urllib.parse import quote
 
 from kroger_api import validation
@@ -115,11 +115,7 @@ class LocationAPI:
             InvalidParameterError: If location_id is malformed; no request is sent
         """
         location_id = validation.location_id(location_id)
-        try:
-            self.client._make_request('HEAD', f'/v1/locations/{quote(location_id, safe="")}')
-            return True
-        except NotFoundError:
-            return False
+        return self._exists(f'/v1/locations/{quote(location_id, safe="")}')
     
     def list_chains(self) -> Dict[str, Any]:
         """
@@ -161,11 +157,7 @@ class LocationAPI:
             InvalidParameterError: If name is empty; no request is sent
         """
         name = validation.check_non_empty("name", name)
-        try:
-            self.client._make_request('HEAD', f'/v1/chains/{quote(name, safe="")}')
-            return True
-        except NotFoundError:
-            return False
+        return self._exists(f'/v1/chains/{quote(name, safe="")}')
     
     def list_departments(self) -> Dict[str, Any]:
         """
@@ -207,8 +199,12 @@ class LocationAPI:
             InvalidParameterError: If department_id is malformed; no request is sent
         """
         department_id = validation.department_id(department_id)
+        return self._exists(f'/v1/departments/{quote(department_id, safe="")}')
+
+    def _exists(self, path: str) -> bool:
+        """True if a HEAD request for path succeeds, False if it gets a 404"""
         try:
-            self.client._make_request('HEAD', f'/v1/departments/{quote(department_id, safe="")}')
+            self.client._make_request('HEAD', path)
             return True
         except NotFoundError:
             return False

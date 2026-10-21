@@ -184,7 +184,7 @@ except KrogerAPIError as e:
 | `InternalServerError` (5xx) | Kroger's server failed |
 | `APIConnectionError`, `APITimeoutError` | No response arrived (requests time out after 30 seconds by default; set `KrogerAPI(timeout=...)`) |
 
-HTTP and network errors also subclass the matching `requests` exceptions, so existing `except requests.exceptions.HTTPError` code keeps working. See the [error handling reference](https://cupofowls.github.io/kroger-api/reference/errors) for every attribute.
+HTTP and network errors also subclass the matching `requests` exceptions, so existing `except requests.exceptions.HTTPError` code still catches every error response from the API. An argument that fails a parameter check raises `InvalidParameterError` (a `ValueError`) without sending a request, so catch `KrogerAPIError` to handle both. A failed cart add whose `outcome_unknown` is `True` may have gone through: check the cart before sending it again. See the [error handling reference](https://cupofowls.github.io/kroger-api/reference/errors) for every attribute.
 
 ## 📚 Example Scripts
 

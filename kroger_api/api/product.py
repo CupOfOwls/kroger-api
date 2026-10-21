@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Any, List, Union
+from typing import Dict, Optional, Any
 from urllib.parse import quote
 
 from kroger_api import validation
@@ -49,9 +49,12 @@ class ProductAPI:
             InvalidParameterError: If a parameter is invalid; no request is sent
             APIStatusError: If the API rejects the request
         """
+        # The Products spec also lists filter.brand as a starting value, but
+        # the API rejects a brand-only search with 400 PRODUCT-2016 "Field
+        # 'term' or 'productId' must be used" (checked live on 2026-10-21).
         if term is None and product_id is None:
             raise InvalidParameterError(
-                "term", None, "a product search needs a term or a product_id"
+                "term", None, "a product search needs a term or a product_id; brand alone is not enough"
             )
 
         params = {}

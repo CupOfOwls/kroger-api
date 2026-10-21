@@ -2,10 +2,8 @@
 Interactive authentication utilities for Kroger API client.
 This module provides functions for interactive authentication flows.
 """
-import os
 import threading
-import time
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Tuple
 
 from ..utils.oauth import (
     start_oauth_server,
@@ -14,17 +12,21 @@ from ..utils.oauth import (
     open_browser_for_auth
 )
 from ..utils.env import get_redirect_uri
+from ..errors import KrogerAPIError
 from ..kroger_api import KrogerAPI
-from ..token_storage import load_token, get_refresh_token
+from ..token_storage import USER_TOKEN_FILE, save_token
 
 def authenticate_user(scopes: str = "cart.basic:write profile.compact", 
-                      token_file: str = ".kroger_token_user.json", 
+                      token_file: str = USER_TOKEN_FILE, 
                       timeout: int = 120) -> KrogerAPI:
     """
     Authenticate a user and return a KrogerAPI client with valid tokens
     
     This function implements the complete OAuth2 authorization code flow,
-    including token refresh and browser-based authorization.
+    including token refresh and browser-based authorization. A saved token
+    is used while it is unexpired, and an expired one is refreshed. The
+    browser opens only if there is no saved token, or it has expired and
+    Kroger rejects (or the client cannot reach Kroger to use) its refresh token.
     
     Args:
         scopes: The OAuth scopes to request
@@ -38,46 +40,16 @@ def authenticate_user(scopes: str = "cart.basic:write profile.compact",
         TimeoutError: If the authorization flow times out
         ValueError: If the authentication fails for other reasons
     """
-    # Initialize the API client
     kroger = KrogerAPI()
-    
-    # Set the token file
     kroger.client.token_file = token_file
-    
-    # Try to load a saved token and test if it's valid
-    token_info = load_token(token_file)
-    if token_info:
-        kroger.client.token_info = token_info
-        
-        # Test if the token is valid
-        try:
-            print("Found saved token, testing if it's still valid...")
-            is_valid = kroger.test_current_token()
-            if is_valid:
-                print("Token is valid - no need to log in again!")
-                return kroger
-        except Exception:
-            print("Token validation failed, will try to refresh")
-            # Token is invalid, continue with the flow
-            pass
-            
-    # If token is invalid, try to refresh it
+
     try:
-        refresh_token = get_refresh_token(token_file)
-        if refresh_token:
-            print("Refreshing token...")
-            token_info = kroger.authorization.refresh_token(refresh_token)
-            # Test the refreshed token
-            is_valid = kroger.test_current_token()
-            if is_valid:
-                print("Token refreshed successfully.")
-                return kroger
-    except Exception as e:
-        print(f"Token refresh failed: {e}")
-        print("Will proceed with new authorization...")
-        # Refresh failed, continue with the full authorization flow
-        pass
-        
+        if kroger.authorization.refresh_token_if_needed(token_file):
+            print("Using the saved token.")
+            return kroger
+    except KrogerAPIError as e:
+        print(f"Could not renew the saved token: {e.message.splitlines()[0]}")
+
     print("Starting new OAuth authorization flow...")
     
     # Extract the port from the redirect URI
@@ -121,19 +93,17 @@ def authenticate_user(scopes: str = "cart.basic:write profile.compact",
         if auth_state != state:
             raise ValueError("State parameter mismatch. Possible CSRF attack.")
         
-        # Exchange the authorization code for an access token
+        # Exchange the authorization code for an access token. The client
+        # saves it to the default user token file.
         print("Authorization code received, exchanging for access token...")
         token_info = kroger.authorization.get_token_with_authorization_code(auth_code)
+        if token_file != USER_TOKEN_FILE:
+            kroger.client.token_file = token_file
+            save_token(token_info, token_file)
         
         print("Authentication successful.")
         return kroger
-        
-    except Exception as e:
-        # Ensure the server is shut down, then re-raise the exception
-        server.shutdown()
-        raise e
     finally:
-        # Ensure the server is shut down
         server.shutdown()
 
 def switch_to_client_credentials(kroger: KrogerAPI, scope: str = "product.compact") -> Tuple[KrogerAPI, Dict, str]:

@@ -25,7 +25,9 @@ working.
 
 Each exception has a ``to_dict()`` that returns its details as JSON-safe
 data, for logging or for returning to another program (kroger-mcp uses it for
-structured tool errors).
+structured tool errors), and an ``outcome_unknown`` flag that is True when the
+failed request may have changed data anyway, so resending it could repeat the
+change (for example, add cart items twice).
 """
 
 import email.utils
@@ -37,6 +39,9 @@ from urllib.parse import urlsplit
 import requests
 
 TOKEN_ENDPOINT = "/v1/connect/oauth2/token"
+
+# Methods that never change data, so resending them is always safe.
+SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
 
 # Bodies longer than this are truncated in messages and to_dict() output.
 _MAX_BODY_CHARS = 2000
@@ -53,6 +58,23 @@ def _json_safe(value: Any) -> Any:
     return repr(value)
 
 
+def _changes_data(method: str, url: Optional[str]) -> bool:
+    """True for a request that can change data, such as PUT /v1/cart/add.
+
+    Token requests count as safe: resending one creates nothing, and at worst
+    the token endpoint rejects a code or refresh token that was already used.
+    """
+    return method.upper() not in SAFE_METHODS and urlsplit(url or "").path != TOKEN_ENDPOINT
+
+
+def _rebuild(cls: type, args: tuple, state: Dict[str, Any]) -> "KrogerAPIError":
+    """Unpickle an error without calling its __init__, whose arguments differ per class."""
+    error = cls.__new__(cls)
+    error.args = args
+    error.__dict__.update(state)
+    return error
+
+
 def _display_url(url: Optional[str]) -> str:
     """Path and query of a URL, which is all a reader needs to identify the call."""
     if not url:
@@ -67,6 +89,12 @@ class KrogerAPIError(Exception):
     #: Short, stable, machine-readable category of the error.
     error_type = "kroger_api_error"
 
+    #: True when the request may have changed data before it failed, so
+    #: resending it could repeat the change. Only a timeout, a lost
+    #: connection, a 5xx, or an unreadable 2xx on a request that changes data
+    #: (such as a cart add) can leave the outcome unknown.
+    outcome_unknown = False
+
     def __init__(self, message: str, *args: Any, **kwargs: Any):
         super().__init__(message, *args, **kwargs)
         self.message = message
@@ -74,9 +102,14 @@ class KrogerAPIError(Exception):
     def __str__(self) -> str:
         return self.message
 
+    def __reduce__(self):
+        # The default pickling calls cls(*self.args), which does not match
+        # the __init__ signature of most subclasses.
+        return _rebuild, (type(self), self.args, self.__dict__)
+
     def to_dict(self) -> Dict[str, Any]:
         """The error's details as JSON-safe data."""
-        return {"type": self.error_type, "message": self.message}
+        return {"type": self.error_type, "message": self.message, "outcome_unknown": self.outcome_unknown}
 
 
 class ConfigurationError(KrogerAPIError, ValueError):
@@ -118,25 +151,45 @@ class NotAuthenticatedError(KrogerAPIError, ValueError):
     error_type = "not_authenticated"
 
 
+_UNKNOWN_OUTCOME_NOTE = (
+    "The request may have reached Kroger before the connection failed, so check its effect "
+    "(for a cart add, the cart in the Kroger app or website) before resending it."
+)
+
+
 class APIConnectionError(KrogerAPIError, requests.exceptions.ConnectionError):
     """The request got no HTTP response: DNS failure, refused or reset connection, TLS error.
+
+    Attributes:
+        method: HTTP method of the request.
+        url: Full request URL.
+        reason: The network error, as ``requests`` reported it.
+        request_sent: False when the client never connected, so the request
+            certainly did not reach Kroger; None when it may have.
 
     The underlying ``requests`` exception is chained as ``__cause__``.
     """
 
     error_type = "connection_error"
 
-    def __init__(self, method: str, url: str, reason: str, request: Any = None, message: Optional[str] = None):
+    def __init__(self, method: str, url: str, reason: str, request: Any = None, message: Optional[str] = None,
+                 request_sent: Optional[bool] = None):
         self.method = method
         self.url = url
         self.reason = reason
-        super().__init__(
-            message or f"Could not reach the Kroger API for {method} {_display_url(url)}: {reason}",
-            request=request,
-        )
+        self.request_sent = request_sent
+        message = message or f"Could not reach the Kroger API for {method} {_display_url(url)}: {reason}"
+        if self.outcome_unknown:
+            message += f" {_UNKNOWN_OUTCOME_NOTE}"
+        super().__init__(message, request=request)
+
+    @property
+    def outcome_unknown(self) -> bool:
+        return self.request_sent is not False and _changes_data(self.method, self.url)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {**super().to_dict(), "method": self.method, "url": self.url, "reason": self.reason}
+        return {**super().to_dict(), "method": self.method, "url": self.url, "reason": self.reason,
+                "request_sent": self.request_sent}
 
 
 class APITimeoutError(APIConnectionError, requests.exceptions.Timeout):
@@ -144,7 +197,8 @@ class APITimeoutError(APIConnectionError, requests.exceptions.Timeout):
 
     error_type = "timeout"
 
-    def __init__(self, method: str, url: str, timeout: Optional[float], reason: str, request: Any = None):
+    def __init__(self, method: str, url: str, timeout: Optional[float], reason: str, request: Any = None,
+                 request_sent: Optional[bool] = None):
         self.timeout = timeout
         super().__init__(
             method,
@@ -155,6 +209,7 @@ class APITimeoutError(APIConnectionError, requests.exceptions.Timeout):
                 f"The Kroger API did not respond within {timeout} seconds for {method} {_display_url(url)} "
                 f"({reason}). Set a different limit with KrogerAPI(timeout=...)."
             ),
+            request_sent=request_sent,
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -249,6 +304,12 @@ class APIStatusError(KrogerAPIError, requests.exceptions.HTTPError):
     """
 
     error_type = "api_error"
+
+    @property
+    def outcome_unknown(self) -> bool:
+        # A 4xx means the request was refused. A 5xx, often from a gateway
+        # that timed out, can come after the request was processed.
+        return self.status_code >= 500 and _changes_data(self.method, self.url)
 
     def __init__(self, response: requests.Response, note: Optional[str] = None):
         request = response.request
@@ -373,7 +434,14 @@ class InvalidResponseError(KrogerAPIError):
         )
         if self.correlation_id:
             message += f" (correlation id {self.correlation_id})"
+        if self.outcome_unknown:
+            message += ". The request succeeded, so do not resend it."
         super().__init__(message)
+
+    @property
+    def outcome_unknown(self) -> bool:
+        # The 2xx status says the request was processed, so resending repeats it
+        return _changes_data(self.method, self.url)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -447,6 +515,12 @@ def _hint_for(error: APIStatusError) -> Optional[str]:
             hint += f" The API asked for a wait of {error.retry_after:g} seconds."
         return hint
     if status >= 500:
+        if error.outcome_unknown:
+            return (
+                "The Kroger API failed while handling the request, and it may have been processed anyway. "
+                "Check its effect (for a cart add, the cart in the Kroger app or website) before resending it. "
+                "Quote the correlation id if you report the problem."
+            )
         return (
             "The Kroger API failed to handle the request. A later retry may succeed. "
             "Quote the correlation id if you report the problem."

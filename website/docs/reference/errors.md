@@ -45,7 +45,7 @@ KrogerAPIError
 | `InternalServerError`   | `server_error`         | The Kroger API answers with a `5xx` status.                                                            |
 | `InvalidResponseError`  | `invalid_response`     | A `2xx` response has a body that is not valid JSON.                                                    |
 
-Because the HTTP and network errors also derive from the matching `requests` exceptions, code written for earlier versions, such as `except requests.exceptions.HTTPError as e: e.response.status_code`, keeps working.
+Because the HTTP and network errors also derive from the matching `requests` exceptions, code written for earlier versions, such as `except requests.exceptions.HTTPError as e: e.response.status_code`, still catches every error response from the Kroger API. An argument that fails a [parameter check](#parameter-checks) is different. Earlier versions sent it, and the API's `400` arrived as an `HTTPError`. Now the client sends no request and raises `InvalidParameterError`, which is a `ValueError`, not an `HTTPError`. Catch `KrogerAPIError` to handle both.
 
 ## API error attributes
 
@@ -68,14 +68,27 @@ Because the HTTP and network errors also derive from the matching `requests` exc
 
 The other exceptions carry these attributes:
 
-| Class                   | Attributes                                                                                       |
-| ----------------------- | ------------------------------------------------------------------------------------------------ |
-| `InvalidParameterError` | `param` (the argument's name, such as `limit` or `items[2].upc`), `value`, `requirement`         |
-| `APIConnectionError`    | `method`, `url`, `reason` (the text of the underlying `requests` exception, also on `__cause__`) |
-| `APITimeoutError`       | The `APIConnectionError` attributes and `timeout` (seconds)                                      |
-| `InvalidResponseError`  | `status_code`, `method`, `url`, `correlation_id`, `body` (the first 2,000 characters)            |
+| Class                   | Attributes                                                                                                                                                            |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `InvalidParameterError` | `param` (the argument's name, such as `limit` or `items[2].upc`), `value`, `requirement`                                                                              |
+| `APIConnectionError`    | `method`, `url`, `reason` (the text of the underlying `requests` exception, also on `__cause__`), `request_sent` (`False` if the client never connected, else `None`) |
+| `APITimeoutError`       | The `APIConnectionError` attributes and `timeout` (seconds)                                                                                                           |
+| `InvalidResponseError`  | `status_code`, `method`, `url`, `correlation_id`, `body` (the first 2,000 characters)                                                                                 |
 
-Every exception has `message`, which is also its `str()`, and `error_type`, a short, stable category for programs to branch on.
+Every exception has `message`, which is also its `str()`, `error_type`, a short, stable category for programs to branch on, and `outcome_unknown`, described in the next section. Every exception can be pickled, so it can cross a process boundary, for example from a `ProcessPoolExecutor` worker.
+
+## Requests whose outcome is unknown
+
+The `outcome_unknown` attribute is `True` when a failed request may have changed data anyway, so sending it again could repeat the change. In `kroger-api`, a cart add is the only request that changes data, and a repeated add puts the items in the cart twice. For such a request, these errors set the attribute:
+
+| Error                  | Why the outcome is unknown                                                                                                                                                                                              |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `APITimeoutError`      | Kroger may have processed the request without answering in time. A timeout while connecting does not count: the request was never sent.                                                                                 |
+| `APIConnectionError`   | The connection failed after the request may have been sent. When the client never connected (a DNS failure, a refused connection, or a TLS or proxy error), `request_sent` is `False` and `outcome_unknown` is `False`. |
+| `InternalServerError`  | A gateway can answer `5xx` after the request was processed.                                                                                                                                                             |
+| `InvalidResponseError` | The `2xx` status says the request was processed. Only the body cannot be read.                                                                                                                                          |
+
+Reads (`GET` and `HEAD`) and token requests always have `outcome_unknown` set to `False`, because sending them again changes nothing. When it is `True`, the message ends with advice to check the effect before you send the request again. The Kroger API has no endpoint that reads the cart, so the user checks it in the Kroger app or website.
 
 ## Error message
 
@@ -125,7 +138,7 @@ The `hint` attribute explains known causes. The client sets it in these cases:
 | `403` from other endpoints                            | The token lacks the scope the endpoint requires.                                                                  |
 | `404`                                                 | Which ID or name does not exist (store, product, chain, or department), and where to find valid ones.             |
 | `429`                                                 | The daily rate limit is used up, so an immediate retry fails too.                                                 |
-| `5xx`                                                 | The Kroger API failed; a later retry may succeed.                                                                 |
+| `5xx`                                                 | The Kroger API failed; a later retry may succeed. For a cart add, the request may have been processed anyway.     |
 
 ## The to_dict() method
 
@@ -135,6 +148,7 @@ Every exception has a `to_dict()` method that returns its details as data you ca
 {
   "type": "not_found",
   "message": "Kroger API error 404 Not Found: (no error message in the response body)\n  request: GET /v1/locations/99999999\n  correlation id: akam_1792607141_ec02f117-d8d0-46c9-8dbe-ba9a40b637ab\n  hint: No store has this locationId. Find valid IDs with a location search.",
+  "outcome_unknown": false,
   "status_code": 404,
   "status_text": "Not Found",
   "kroger_code": null,
@@ -149,7 +163,7 @@ Every exception has a `to_dict()` method that returns its details as data you ca
 }
 ```
 
-An `InvalidParameterError` adds `param`, `value`, and `requirement`. A connection error adds `method`, `url`, and `reason`, and a timeout also adds `timeout`.
+An `InvalidParameterError` adds `param`, `value`, and `requirement`. A connection error adds `method`, `url`, `reason`, and `request_sent`, and a timeout also adds `timeout`.
 
 ## Parameter checks
 
@@ -177,10 +191,12 @@ Optional filters must be `None` to be left out. An empty string, such as `brand=
 
 When a request gets a `401`, the client tries once to get a new token and resend the request:
 
-1. A user token is refreshed with its refresh token.
-1. A client-credentials token is replaced with a new one for the same scope.
+1. A user token is refreshed with its refresh token. If Kroger rejects that refresh token and the token file holds a different one, the client tries the one from the file too: another process that shares the file may have refreshed the token since this client loaded it.
+1. A client-credentials token from `get_token_with_client_credentials` is replaced with a new one for the same scope.
 
-If there is no way to get a new token, or the resent request also gets a `401`, the client raises `AuthenticationError`, and its `note` says which of these happened. A user token is never replaced with a client-credentials token.
+Any other token is not replaced. A user token without a refresh token, for example, is never swapped for a client-credentials token, even after you switch the client to client credentials and back.
+
+If there is no way to get a new token, Kroger rejects the refresh token, or the resent request also gets a `401`, the client raises `AuthenticationError`, and its `note` says which of these happened. If the token request fails for another reason, the client raises that error instead, because its message describes the real problem: an `APIConnectionError` for the token endpoint when the network is down, or an `AuthenticationError` from the token endpoint, whose hint says the client ID or secret is wrong.
 
 ## Timeouts
 

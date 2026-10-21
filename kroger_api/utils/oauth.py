@@ -6,9 +6,7 @@ import threading
 import webbrowser
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
-import os
-import random
-import string
+import secrets
 
 class OAuth2Handler(BaseHTTPRequestHandler):
     """HTTP request handler for OAuth2 redirect"""
@@ -100,25 +98,36 @@ def extract_port_from_redirect_uri(redirect_uri):
         redirect_uri: The redirect URI
         
     Returns:
-        The port number
+        The port number: the explicit port, else 80 for http and 443 for https
+
+    Raises:
+        ValueError: If the URI has an invalid port, or no port and no http(s) scheme
     """
+    parsed = urlparse(redirect_uri)
     try:
-        port = int(redirect_uri.split(":")[-1].split("/")[0])
-        return port
-    except (ValueError, IndexError):
+        port = parsed.port
+    except ValueError:
+        raise ValueError(f"Could not extract port from redirect URI: {redirect_uri}") from None
+    if port is None:
+        port = {"http": 80, "https": 443}.get(parsed.scheme)
+    if port is None:
         raise ValueError(f"Could not extract port from redirect URI: {redirect_uri}")
+    return port
 
 def generate_random_state(length=16):
     """
     Generate a random state string for OAuth2 security
+
+    The state guards against cross-site request forgery, so it comes from
+    the secrets module, not from the predictable random module.
     
     Args:
         length: The length of the state string
         
     Returns:
-        A random string
+        A random string of letters, digits, '-', and '_'
     """
-    return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+    return secrets.token_urlsafe(length)[:length]
 
 def open_browser_for_auth(auth_url):
     """

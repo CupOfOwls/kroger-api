@@ -41,8 +41,10 @@ GATEWAY_401 = {
 
 @pytest.fixture(autouse=True)
 def token_dir(tmp_path, monkeypatch):
-    """Keep every token file a test writes out of the real data directory."""
+    """Keep every token file a test writes out of the real data directory, and
+    run from an empty directory so that no developer's .env file is read."""
     monkeypatch.setenv("KROGER_TOKEN_DIR", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
     return tmp_path
 
 
@@ -400,3 +402,178 @@ def test_unknown_product_404_names_the_product(kroger, requests_mock):
     with pytest.raises(NotFoundError) as excinfo:
         kroger.product.get_product("9999999999999")
     assert "No product has this productId" in excinfo.value.hint
+
+
+# --- requests whose outcome is unknown ------------------------------------------
+
+CART_URL = f"{BASE}/v1/cart/add"
+CART_ITEM = [{"upc": "0001111041700", "quantity": 1, "modality": "PICKUP"}]
+
+
+def _refused_connection():
+    """The exception requests raises when nothing listens on the port (no request was sent)."""
+    import urllib3
+    reason = urllib3.exceptions.NewConnectionError(None, "Failed to establish a new connection: [Errno 111] Connection refused")
+    return requests.exceptions.ConnectionError(urllib3.exceptions.MaxRetryError(None, CART_URL, reason=reason))
+
+
+def test_cart_add_timeout_leaves_the_outcome_unknown(kroger, requests_mock):
+    requests_mock.put(CART_URL, exc=requests.exceptions.ReadTimeout("read timed out"))
+    with pytest.raises(APITimeoutError) as excinfo:
+        kroger.cart.add_to_cart(CART_ITEM)
+    error = excinfo.value
+    assert error.outcome_unknown is True
+    assert error.request_sent is None
+    assert "may have reached Kroger" in str(error) and "before resending it" in str(error)
+    assert error.to_dict()["outcome_unknown"] is True
+
+
+def test_cart_add_that_never_connected_is_safe_to_resend(kroger, requests_mock):
+    requests_mock.put(CART_URL, exc=requests.exceptions.ConnectTimeout("connect timed out"))
+    with pytest.raises(APITimeoutError) as excinfo:
+        kroger.cart.add_to_cart(CART_ITEM)
+    assert excinfo.value.request_sent is False
+    assert excinfo.value.outcome_unknown is False
+
+    requests_mock.put(CART_URL, exc=_refused_connection())
+    with pytest.raises(APIConnectionError) as excinfo:
+        kroger.cart.add_to_cart(CART_ITEM)
+    assert excinfo.value.request_sent is False
+    assert excinfo.value.outcome_unknown is False
+    assert "may have reached Kroger" not in str(excinfo.value)
+
+
+def test_cart_add_connection_lost_after_sending_leaves_the_outcome_unknown(kroger, requests_mock):
+    requests_mock.put(CART_URL, exc=requests.exceptions.ConnectionError("Connection aborted: RemoteDisconnected"))
+    with pytest.raises(APIConnectionError) as excinfo:
+        kroger.cart.add_to_cart(CART_ITEM)
+    assert excinfo.value.outcome_unknown is True
+
+
+def test_cart_add_server_error_leaves_the_outcome_unknown(kroger, requests_mock):
+    requests_mock.put(CART_URL, status_code=504, text="")
+    with pytest.raises(InternalServerError) as excinfo:
+        kroger.cart.add_to_cart(CART_ITEM)
+    assert excinfo.value.outcome_unknown is True
+    assert "may have been processed anyway" in excinfo.value.hint
+
+
+def test_reads_and_token_requests_are_always_safe_to_resend(kroger, requests_mock):
+    requests_mock.get(f"{BASE}/v1/chains", exc=requests.exceptions.ReadTimeout("read timed out"))
+    with pytest.raises(APITimeoutError) as excinfo:
+        kroger.location.list_chains()
+    assert excinfo.value.outcome_unknown is False
+
+    requests_mock.get(f"{BASE}/v1/departments", status_code=502, text="")
+    with pytest.raises(InternalServerError) as excinfo:
+        kroger.location.list_departments()
+    assert excinfo.value.outcome_unknown is False
+    assert "A later retry may succeed" in excinfo.value.hint
+
+    requests_mock.post(TOKEN_URL, exc=requests.exceptions.ReadTimeout("read timed out"))
+    with pytest.raises(APITimeoutError) as excinfo:
+        kroger.authorization.refresh_token("refresh-1")
+    assert excinfo.value.outcome_unknown is False
+
+
+def test_cart_add_with_unreadable_success_body_must_not_be_resent(kroger, requests_mock):
+    requests_mock.put(CART_URL, status_code=200, text="<html>ok</html>")
+    with pytest.raises(InvalidResponseError) as excinfo:
+        kroger.cart.add_to_cart(CART_ITEM)
+    assert excinfo.value.outcome_unknown is True
+    assert "do not resend it" in str(excinfo.value)
+
+
+# --- pickling ----------------------------------------------------------------
+
+
+def test_errors_survive_pickling(kroger, requests_mock):
+    import pickle
+    from kroger_api.errors import InvalidParameterError
+
+    requests_mock.get(f"{BASE}/v1/chains", status_code=400,
+                      json={"errors": {"code": "LOCATION-2001", "reason": "bad"}},
+                      headers={"X-Correlation-Id": CORRELATION})
+    requests_mock.get(f"{BASE}/v1/departments", exc=requests.exceptions.ReadTimeout("read timed out"))
+    errors = [InvalidParameterError("limit", 0, "must be from 1 to 50"), ConfigurationError("missing"),
+              NotAuthenticatedError("no token")]
+    for call in (kroger.location.list_chains, kroger.location.list_departments):
+        with pytest.raises(KrogerAPIError) as excinfo:
+            call()
+        errors.append(excinfo.value)
+
+    for error in errors:
+        copy = pickle.loads(pickle.dumps(error))
+        assert type(copy) is type(error)
+        assert str(copy) == str(error)
+        assert copy.to_dict() == error.to_dict()
+    assert pickle.loads(pickle.dumps(errors[3])).response.status_code == 400
+
+
+# --- 401 recovery edge cases ---------------------------------------------------
+
+
+def test_restored_user_token_is_never_replaced_by_an_app_token(requests_mock):
+    """The documented switch_to_client_credentials pattern, with a user token that has no refresh token"""
+    from kroger_api.auth import switch_to_client_credentials
+
+    user_token = {"access_token": "user", "expires_in": 1800, "expires_at": time.time() + 1800}
+    save_token(user_token, ".kroger_token_user.json")
+    requests_mock.post(TOKEN_URL, json={"access_token": "app", "expires_in": 1800})
+    requests_mock.get(f"{BASE}/v1/identity/profile", **GATEWAY_401)
+
+    api = KrogerAPI(client_id="id", client_secret="secret")
+    api.client.token_info, api.client.token_file = dict(user_token), ".kroger_token_user.json"
+    api, saved_info, saved_file = switch_to_client_credentials(api)
+    api.client.token_info, api.client.token_file = saved_info, saved_file
+
+    with pytest.raises(AuthenticationError) as excinfo:
+        api.identity.get_profile()
+    assert "not a client-credentials token" in excinfo.value.note
+    assert api.client.token_info["access_token"] == "user"
+    assert load_token(".kroger_token_user.json")["access_token"] == "user"
+    assert sum(1 for r in requests_mock.request_history if r.url == TOKEN_URL) == 1  # only the switch
+
+
+def test_network_error_while_refreshing_is_raised_as_itself(kroger, requests_mock):
+    kroger.client.token_info["refresh_token"] = "refresh-1"
+    requests_mock.put(CART_URL, **GATEWAY_401)
+    requests_mock.post(TOKEN_URL, exc=requests.exceptions.ConnectionError("connection reset"))
+    with pytest.raises(APIConnectionError) as excinfo:
+        kroger.cart.add_to_cart(CART_ITEM)
+    error = excinfo.value
+    assert not isinstance(error, AuthenticationError)
+    assert error.url == TOKEN_URL and "connection reset" in str(error)
+    # The cart request got a 401, so it was not processed: resending it is safe
+    assert error.outcome_unknown is False
+
+
+def test_rejected_app_credentials_while_refreshing_are_raised_as_themselves(kroger, requests_mock):
+    kroger.client.token_info["refresh_token"] = "refresh-1"
+    requests_mock.get(f"{BASE}/v1/identity/profile", **GATEWAY_401)
+    requests_mock.post(TOKEN_URL, status_code=401,
+                       json={"error": "invalid_client", "error_description": "Client authentication failed"})
+    with pytest.raises(AuthenticationError) as excinfo:
+        kroger.identity.get_profile()
+    assert excinfo.value.url == TOKEN_URL
+    assert "KROGER_CLIENT_ID" in excinfo.value.hint
+
+
+def test_401_uses_a_refresh_token_that_another_process_saved(kroger, requests_mock):
+    """Another process refreshed first, so the refresh token in memory was rotated out"""
+    kroger.client.token_info["refresh_token"] = "refresh-1"
+    kroger.client.token_file = ".kroger_token_user.json"
+    save_token({"access_token": "other", "refresh_token": "refresh-2", "expires_in": 1800}, ".kroger_token_user.json")
+    requests_mock.get(f"{BASE}/v1/identity/profile",
+                      [GATEWAY_401, {"status_code": 200, "json": {"data": {"id": "user-1"}}}])
+
+    def token_response(request, context):
+        if "refresh_token=refresh-2" in request.text:
+            return {"access_token": "new", "refresh_token": "refresh-3", "expires_in": 1800}
+        context.status_code = 400
+        return {"error": "invalid_request", "error_description": "invalid refresh_token"}
+
+    requests_mock.post(TOKEN_URL, json=token_response)
+    assert kroger.identity.get_profile() == {"data": {"id": "user-1"}}
+    assert requests_mock.request_history[-1].headers["Authorization"] == "Bearer new"
+    assert load_token(".kroger_token_user.json")["refresh_token"] == "refresh-3"

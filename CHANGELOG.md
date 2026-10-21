@@ -13,21 +13,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Parameter validation** (`kroger_api.validation`) against the constraints in the Kroger OpenAPI specs, confirmed against live responses. Invalid arguments raise `InvalidParameterError` (a `ValueError`) that names the parameter and the valid values, and no request is sent. This catches inputs the API accepts silently: an unknown or wrongly cased `fulfillment` type, a location search `limit` or `radius_in_miles` of 0, and a product search term with repeated spaces (which the API rejects with only "Invalid parameters"). The constraint constants are public for reuse in other schemas.
 - `APIConnectionError` and `APITimeoutError` wrap network failures. Requests now time out after 30 seconds by default (previously they could wait forever); set `KrogerAPI(timeout=...)`.
 - `ConfigurationError` for missing credentials or redirect URI, and `NotAuthenticatedError` for calls made before a token is obtained; both subclass `ValueError` as before. `InvalidResponseError` for a 2xx response whose body is not JSON.
+- **`outcome_unknown`** on every exception: `True` when a request that changes data (a cart add) failed in a way that leaves its outcome unknown (a read timeout, a connection lost after sending, a 5xx, or an unreadable 2xx), so resending it could add the items twice. `APIConnectionError.request_sent` is `False` when the client never connected, so the request certainly did not reach Kroger. Messages and hints for these errors say to check the cart before resending.
+- Every exception can be pickled, so it can cross a process boundary.
+- `kroger_api.utils.env.load_env_file()` and `kroger_api.token_storage.USER_TOKEN_FILE`.
 
 ### Fixed
 
-- **Automatic token refresh on 401 never ran.** The client looked for `{"error": "invalid_token"}` in the body, but the Kroger API gateway returns `{"message": "Unauthorized"}` and signals `invalid_token` only in the `WWW-Authenticate` header. Any 401 now triggers one recovery: a user token is refreshed, a client-credentials token is re-requested, and the request is retried once.
+- **Automatic token refresh on 401 never ran.** The client looked for `{"error": "invalid_token"}` in the body, but the Kroger API gateway returns `{"message": "Unauthorized"}` and signals `invalid_token` only in the `WWW-Authenticate` header. Any 401 now triggers one recovery, and the request is retried once. A user token is refreshed; if Kroger rejects the refresh token and the token file holds a newer one (saved by another process), that one is tried too. A client-credentials token obtained with `get_token_with_client_credentials` is re-requested; no other token is ever replaced with a client-credentials token. A token request that fails for a reason other than a rejected refresh token, such as a network failure or rejected client credentials, is raised as itself rather than as the original 401.
 - **`test_token` treated every token as invalid.** It probed `/v1/connect/oauth2/profile`, which does not exist (it returns 404 for any token), so every check failed: client-credentials tokens were re-requested and user tokens refreshed on every check, costing up to four extra requests per kroger-mcp tool call. Tokens now record `expires_at` when issued, and the check compares it with the clock. Token files saved by earlier versions get their expiry from the file's modification time.
 - Product search `limit=0` and `start=0` were dropped silently because of a truthiness check. `limit=0` now raises `InvalidParameterError`, and `start=0` is sent.
 - Path parameters are URL-quoted, so chain names with spaces or apostrophes (`"LOAF 'N JUG"`) work.
 - A refresh response without a new refresh token no longer discards the existing one (RFC 6749 section 6).
 - `get_authorization_url` without a redirect URI raises `ConfigurationError`. It used to build a URL with `redirect_uri=None` in it.
 - `refresh_token_if_needed` puts an unexpired saved token on the client, so the next call uses it, and saves a refreshed token back to the file it came from. It returns `None` when the refresh token is rejected, and raises other errors, such as a network failure, instead of returning `None` for them too.
+- `authenticate_user(token_file=...)` saves a new sign-in to that file. It always saved to `.kroger_token_user.json`.
+- `extract_port_from_redirect_uri` returns 80 or 443 for a redirect URI without a port, such as `http://localhost/callback`. It raised `ValueError`.
+
+### Security
+
+- `generate_random_state` uses the `secrets` module. It used `random`, whose output can be predicted, for the OAuth state that guards against cross-site request forgery.
+- `save_token` writes a temporary file that is private (mode 600) from the moment it is created, then replaces the token file with it. It used to write the token file with default permissions and restrict them afterward, and a failed or concurrent write could leave a half-written file.
 
 ### Changed
 
 - `location_exists`, `chain_exists`, and `department_exists` raise `InvalidParameterError` for a malformed ID instead of a 400 `HTTPError`; they still return `False` for a well-formed ID that does not exist.
 - An empty string passed for an optional filter (`brand=""`, `location_id=""`) now raises `InvalidParameterError` instead of being dropped. Pass `None` to omit a filter.
+- Arguments that fail a parameter check raise `InvalidParameterError`, a `ValueError`, before any request. Earlier versions sent them, and the API's 400 arrived as a `requests.HTTPError`, so `except requests.exceptions.HTTPError` no longer catches these cases. Catch `KrogerAPIError` to handle both.
+- A product search needs a `term` or a `product_id`. A search by `brand` alone, which the Products spec lists as valid, raises `InvalidParameterError`: the live API rejects it with 400 `PRODUCT-2016`.
+- Library messages (token loading, refreshing, and the like) go through the standard `logging` module under the `kroger_api` loggers, instead of `print` to stderr. Warnings still appear by default; informational messages appear only when logging is configured for them. Loading a token file no longer prints a line every time. The interactive `authenticate_user` flow still prints its prompts.
+- A `.env` file is read from the working directory when a client is created, as the documentation says. It was read when the package was imported, starting from the package's own directory, so a `.env` file next to the installed package or above the source tree could be loaded instead.
+- `validation.cart_items` accepts a tuple of items and returns a list.
 
 ## [0.3.1] - 2026-07-08
 

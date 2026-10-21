@@ -46,7 +46,7 @@ To build your own message, read the attributes instead: `status_code`, `kroger_c
 
 ## Retry only what a retry can fix
 
-A retry helps only when the failure is temporary. Retry a network failure or a `5xx` response once, after a short wait. Do not retry other errors: the same request fails the same way.
+A retry helps only when the failure is temporary. Retry a network failure or a `5xx` response once, after a short wait, unless the error's `outcome_unknown` is `True`. In that case a cart add may have gone through, and a retry could add the items twice. Do not retry other errors: the same request fails the same way.
 
 ```python
 import time
@@ -57,7 +57,9 @@ from kroger_api import APIConnectionError, InternalServerError
 def call_with_one_retry(call, delay_seconds=5):
     try:
         return call()
-    except (APIConnectionError, InternalServerError):
+    except (APIConnectionError, InternalServerError) as e:
+        if e.outcome_unknown:
+            raise  # the request may have been processed: check before sending it again
         time.sleep(delay_seconds)
         return call()
 
@@ -67,7 +69,7 @@ products = call_with_one_retry(
 )
 ```
 
-`APIConnectionError` also covers `APITimeoutError`. The client already handles one case of `401` itself: it gets a new token and resends the request once, as the [401 recovery](../reference/errors.md#401-recovery) section describes.
+`APIConnectionError` also covers `APITimeoutError`. The [outcome reference](../reference/errors.md#requests-whose-outcome-is-unknown) lists when `outcome_unknown` is `True`. The client already handles one case of `401` itself: it gets a new token and resends the request once, as the [401 recovery](../reference/errors.md#401-recovery) section describes.
 
 | Error                                         | What to do                                                                                                    |
 | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
@@ -77,7 +79,7 @@ products = call_with_one_retry(
 | `PermissionDeniedError`                       | Use a token with the scope the endpoint needs. Cart calls need a user token.                                  |
 | `NotFoundError`                               | Look up a valid ID with a search or list call.                                                                |
 | `RateLimitError`                              | Stop and resume after the daily limit resets. See [Handle rate limits and pagination](handle-rate-limits.md). |
-| `InternalServerError`, `APIConnectionError`   | Retry once after a short wait.                                                                                |
+| `InternalServerError`, `APIConnectionError`   | Retry once after a short wait. If `outcome_unknown` is `True`, have the user check the cart first.            |
 | `ConfigurationError`                          | Set the missing environment variable or argument.                                                             |
 
 ## Log the details
@@ -93,6 +95,13 @@ try:
 except KrogerAPIError as e:
     logging.error("Kroger API call failed: %s", json.dumps(e.to_dict()))
     raise
+```
+
+The client also logs what it does about tokens, such as refreshing an expired one, through the `kroger_api` logger. Warnings, such as a rejected refresh token, appear by default. To see the informational messages too, set the logger's level:
+
+```python
+logging.basicConfig()
+logging.getLogger("kroger_api").setLevel(logging.INFO)
 ```
 
 ## Check user input early
@@ -119,7 +128,7 @@ Some mistakes return an empty result instead of an error, so check for them when
 
 ## Keep older error handling working
 
-Code written for earlier versions keeps working, because the HTTP and network errors also derive from the `requests` exceptions:
+Code written for earlier versions still catches every error response from the Kroger API, because the HTTP and network errors also derive from the `requests` exceptions:
 
 ```python
 import requests
@@ -131,3 +140,5 @@ except requests.exceptions.HTTPError as e:
 ```
 
 Change `except requests.exceptions.HTTPError` to `except APIStatusError` when you want the parsed details, such as `kroger_message`.
+
+An argument that fails a parameter check is not an `HTTPError`. Earlier versions sent it and received a `400`; now the client sends nothing and raises `InvalidParameterError`, which derives from `ValueError`. To keep handling both in one place, catch `KrogerAPIError`.

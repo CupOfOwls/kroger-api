@@ -10,9 +10,9 @@ Kroger access tokens expire after 30 minutes. If a script runs longer than this 
 
 ## Default behavior
 
-Tokens obtained through `authenticate_user` are saved to a local token file with their refresh token, and with `expires_at`, the time they expire. The library loads the stored token on later runs and refreshes it if it has expired. The browser only opens if there is no refresh token available.
+Tokens obtained through `authenticate_user` are saved to a local token file with their refresh token, and with `expires_at`, the time they expire. The library loads the stored token on later runs and refreshes it if it has expired. The browser opens only if there is no stored token, or the token has expired and cannot be refreshed: Kroger rejects the refresh token, or the client cannot reach Kroger.
 
-During a run, a request that gets `401` because the token has expired or been revoked is retried once: the client refreshes a user token, or requests a new client-credentials token, and resends the request. If that fails, the client raises `AuthenticationError`, and its `note` says why. See [401 recovery](../reference/errors.md#401-recovery).
+During a run, a request that gets `401` because the token has expired or been revoked is retried once: the client refreshes a user token, or requests a new client-credentials token, and resends the request. If Kroger rejects the refresh token, the client also tries the one in the token file, which another process that shares the file may have saved. If that fails, the client raises `AuthenticationError`, and its `note` says why. See [401 recovery](../reference/errors.md#401-recovery).
 
 ## Refresh explicitly
 

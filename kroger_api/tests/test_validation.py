@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from kroger_api import KrogerAPI
+from kroger_api import KrogerAPI, validation
 from kroger_api.errors import InvalidParameterError
 
 BASE = "https://api.kroger.com"
@@ -12,6 +12,7 @@ BASE = "https://api.kroger.com"
 @pytest.fixture(autouse=True)
 def token_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("KROGER_TOKEN_DIR", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
 
 
 @pytest.fixture
@@ -119,3 +120,30 @@ def test_valid_cart_items_are_sent(kroger, requests_mock):
     assert kroger.cart.add_to_cart([{"upc": "0001111041700", "quantity": 2, "modality": "DELIVERY"},
                                     {"upc": "0001111041700", "quantity": 1}]) is None
     assert requests_mock.request_history[0].json()["items"][0]["quantity"] == 2
+
+
+@pytest.mark.parametrize(
+    "check, value",
+    [
+        (validation.location_id, "01400513\n"),
+        (validation.product_id, "0001111041700\n"),
+        (validation.department_id, "09\n"),
+        (validation.zip_code, "45202\n"),
+        (validation.location_id_list, "01400513,01400514\n"),
+        (validation.product_id_list, "0001111041700\n"),
+    ],
+)
+def test_ids_with_a_trailing_newline_are_rejected(check, value):
+    with pytest.raises(InvalidParameterError):
+        check(value)
+
+
+def test_cart_items_accepts_a_tuple_and_returns_a_list():
+    items = ({"upc": "0001111041700", "quantity": 2},)
+    assert validation.cart_items(items) == [{"upc": "0001111041700", "quantity": 2}]
+
+
+def test_brand_alone_is_not_a_product_search(kroger, requests_mock):
+    with pytest.raises(InvalidParameterError) as excinfo:
+        kroger.product.search_products(brand="Kroger", location_id="01400513")
+    assert "brand alone" in excinfo.value.requirement
