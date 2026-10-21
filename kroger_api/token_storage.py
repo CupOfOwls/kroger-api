@@ -78,7 +78,16 @@ def load_token(token_file: str = TOKEN_FILE) -> Optional[Dict[str, Any]]:
     try:
         with open(token_file, "r") as f:
             token_info = json.load(f)
-        
+
+        # Token files written before 0.4.0 have no expires_at. The file is
+        # written when the token is issued, so its mtime marks the start of
+        # the token's lifetime.
+        if isinstance(token_info, dict) and "expires_at" not in token_info and token_info.get("expires_in") is not None:
+            try:
+                token_info["expires_at"] = os.path.getmtime(token_file) + float(token_info["expires_in"])
+            except (OSError, TypeError, ValueError):
+                pass
+
         print(f"Found saved token, will test if it's still valid...", file=sys.stderr)
         return token_info
     except (json.JSONDecodeError, IOError) as e:

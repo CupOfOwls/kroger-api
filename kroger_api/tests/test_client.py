@@ -15,7 +15,7 @@ class TestKrogerClient(unittest.TestCase):
 
     @patch('kroger_api.client.load_token')
     @patch('kroger_api.client.save_token')
-    @patch('kroger_api.client.requests.post')
+    @patch('kroger_api.client.requests.request')
     
     def test_get_token_with_client_credentials(self, mock_post, mock_save_token, mock_load_token):
         #mock load_token to return None

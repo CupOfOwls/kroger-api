@@ -2,6 +2,7 @@ import sys
 from typing import Dict, Optional, Any
 
 from kroger_api.client import KrogerClient
+from kroger_api.errors import BadRequestError
 from kroger_api.token_storage import get_refresh_token, load_token
 
 
@@ -72,15 +73,20 @@ class AuthorizationAPI:
         """
         return self.client.refresh_token(refresh_token)
     
-    def refresh_token_if_needed(self, token_file: str = None) -> Dict[str, Any]:
+    def refresh_token_if_needed(self, token_file: str = None) -> Optional[Dict[str, Any]]:
         """
-        Check if the token needs refreshing and refresh it if necessary
+        Load a saved token into the client, refreshing it first if it has expired
         
         Args:
             token_file: The file path to load the token from
         
         Returns:
-            The token information (either existing or refreshed)
+            The token information (either existing or refreshed), or None if
+            there is no saved token, or it has expired and cannot be refreshed
+
+        Raises:
+            KrogerAPIError: If refreshing fails for another reason than a
+                rejected refresh token, such as a network error
         """
         # Determine which token file to use
         if token_file is None:
@@ -91,21 +97,22 @@ class AuthorizationAPI:
         
         # Load the token
         token_info = load_token(token_file)
+        if not token_info:
+            return None
+
+        # A refreshed token is saved back to the file it was loaded from
+        self.client.token_file = token_file
         
-        if token_info:
-            # Test if the token is valid
-            if self.client.test_token(token_info):
-                # Token is valid, return it
-                return token_info
+        # Use the saved token while it is unexpired
+        if not self.client.is_token_expired(token_info):
+            self.client.token_info = token_info
+            return token_info
             
-            # Token is invalid, check if we have a refresh token
-            refresh_token = get_refresh_token(token_file)
-            if refresh_token:
-                # Try to refresh the token
-                try:
-                    return self.refresh_token(refresh_token)
-                except Exception as e:
-                    print(f"Failed to refresh token: {e}", file=sys.stderr)
-        
-        # If we couldn't refresh or there was no token, return None
-        return None
+        refresh_token = token_info.get("refresh_token") or get_refresh_token(token_file)
+        if not refresh_token:
+            return None
+        try:
+            return self.refresh_token(refresh_token)
+        except BadRequestError as e:
+            print(f"Failed to refresh token: {e}", file=sys.stderr)
+            return None

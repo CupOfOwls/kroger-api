@@ -1,5 +1,6 @@
 from typing import Dict, List, Any
 
+from kroger_api import validation
 from kroger_api.client import KrogerClient
 
 
@@ -23,15 +24,20 @@ class CartAPI:
         
         Args:
             items: A list of items to add to the cart. Each item should be a dictionary with keys:
-                  - upc: The UPC of the item
-                  - quantity: The quantity of the item
+                  - upc: The UPC of the item (13 digits)
+                  - quantity: The quantity of the item (an integer of 1 or more)
                   - modality: (Optional) The modality including: DELIVERY, PICKUP
                   
         Returns:
             None if successful
+
+        Raises:
+            InvalidParameterError: If an item is malformed; no request is sent
+            PermissionDeniedError: If the token is not a user token with cart.basic:write
+            BadRequestError: If the API rejects an item
         """
         data = {
-            "items": items
+            "items": validation.cart_items(items)
         }
         
         return self.client._make_request('PUT', '/v1/cart/add', data=data)

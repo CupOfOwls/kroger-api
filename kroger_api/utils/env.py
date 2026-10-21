@@ -7,6 +7,8 @@ import sys
 from typing import List, Dict, Optional
 from dotenv import load_dotenv
 
+from kroger_api.errors import ConfigurationError
+
 def load_and_validate_env(required_vars: List[str]) -> Dict[str, str]:
     """
     Load environment variables from .env file and validate required variables
@@ -18,7 +20,8 @@ def load_and_validate_env(required_vars: List[str]) -> Dict[str, str]:
         Dictionary of environment variables
         
     Raises:
-        ValueError: If any required environment variables are missing
+        ConfigurationError: If any required environment variables are missing
+            (a ValueError subclass)
     """
     # Load environment variables from .env file
     load_dotenv()
@@ -37,7 +40,7 @@ def load_and_validate_env(required_vars: List[str]) -> Dict[str, str]:
     if missing_vars:
         error_message = f"Missing required environment variables: {', '.join(missing_vars)}\n"
         error_message += "Please set these variables in your .env file or environment."
-        raise ValueError(error_message)
+        raise ConfigurationError(error_message)
         
     return env_vars
 
@@ -49,11 +52,11 @@ def get_redirect_uri() -> str:
         The redirect URI
         
     Raises:
-        ValueError: If the redirect URI is not set
+        ConfigurationError: If the redirect URI is not set (a ValueError subclass)
     """
     redirect_uri = os.getenv("KROGER_REDIRECT_URI")
     if not redirect_uri:
-        raise ValueError(
+        raise ConfigurationError(
             "KROGER_REDIRECT_URI environment variable is not set.\n"
             "Please set this variable in your .env file or environment."
         )

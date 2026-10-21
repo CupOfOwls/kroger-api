@@ -96,20 +96,20 @@ This library implements robust, automatic token management:
 ### ✨ Features
 - **Automatic token refresh** - No manual token handling required
 - **Persistent storage** - Tokens saved securely to avoid repeated logins  
-- **Proactive validation** - Tests tokens before use
+- **Expiry tracking** - Checks a token's expiry time before use, with no API call
 - **Reactive recovery** - Automatically refreshes expired tokens during API calls
 - **PKCE Support** - Enhanced OAuth security with Proof Key for Code Exchange
 
 ### 🔧 How it Works
 
 **Proactive Approach:**
-1. Loads saved tokens and tests them with a lightweight API request
+1. Loads saved tokens and checks their expiry time (no API request)
 2. Automatically refreshes if token is expired and refresh token is available
 
 **Reactive Approach:**
 1. Makes API requests with current token
-2. On 401 Unauthorized errors, attempts token refresh
-3. Retries original request with new token
+2. On 401 Unauthorized errors, refreshes the user token, or requests a new client-credentials token
+3. Retries the original request once with the new token
 
 Token files (automatically managed):
 - `.kroger_token_client_product.compact.json` - Client credentials tokens
@@ -151,6 +151,40 @@ token_info = kroger.authorization.get_token_with_authorization_code(
 ```
 
 PKCE helps protect against authorization code interception attacks, particularly important for public clients or those using external tools to manage OAuth flows.
+
+## ⚠️ Error Handling
+
+Every exception the library raises derives from `KrogerAPIError`. Invalid arguments are rejected before any request is sent, and every non-2xx response raises an exception that carries Kroger's own error code and message:
+
+```python
+from kroger_api import KrogerAPI, KrogerAPIError, InvalidParameterError, NotFoundError
+
+try:
+    kroger.location.get_location("99999999")
+except NotFoundError as e:
+    print(e)
+    # Kroger API error 404 Not Found: (no error message in the response body)
+    #   request: GET /v1/locations/99999999
+    #   correlation id: akam_1792606007_ba10cee2-f276-444a-aeac-082b98ac9ca3
+    #   hint: No store has this locationId. Find valid IDs with a location search.
+except KrogerAPIError as e:
+    print(e.to_dict())  # the same details as JSON-safe data
+```
+
+| Exception | When |
+|-----------|------|
+| `InvalidParameterError` | An argument breaks a documented API constraint, such as `fulfillment="delivery"` (valid: `ais`, `csp`, `dth`, `sth`). No request is sent. |
+| `ConfigurationError` | Credentials or the redirect URI are missing |
+| `NotAuthenticatedError` | A call was made before any token was obtained |
+| `BadRequestError` (400) | The API rejected a parameter; `kroger_message` names it |
+| `AuthenticationError` (401) | The token, or at the token endpoint the client credentials, were rejected after one automatic refresh-and-retry |
+| `PermissionDeniedError` (403) | The token type or scope cannot use this endpoint, such as a client-credentials token on the cart |
+| `NotFoundError` (404) | The location, chain, or department does not exist |
+| `RateLimitError` (429) | The endpoint's daily rate limit is used up |
+| `InternalServerError` (5xx) | Kroger's server failed |
+| `APIConnectionError`, `APITimeoutError` | No response arrived (requests time out after 30 seconds by default; set `KrogerAPI(timeout=...)`) |
+
+HTTP and network errors also subclass the matching `requests` exceptions, so existing `except requests.exceptions.HTTPError` code keeps working. See the [error handling reference](https://cupofowls.github.io/kroger-api/reference/errors) for every attribute.
 
 ## 📚 Example Scripts
 
