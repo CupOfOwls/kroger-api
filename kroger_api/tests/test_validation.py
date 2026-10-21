@@ -173,6 +173,13 @@ def test_coordinate_rejects_non_numbers(value):
         validation.coordinate(value, "lat", 90)
 
 
-def test_coordinate_accepts_numbers():
+def test_coordinate_accepts_numbers_and_writes_them_without_an_exponent():
+    from decimal import Decimal
+
     assert validation.coordinate(39.5, "lat", 90) == "39.5"
     assert validation.coordinate(-84, "lon", 180) == "-84"
+    assert validation.coordinate(39.306346, "lat", 90) == "39.306346"
+    assert validation.coordinate(1e-07, "lat", 90) == "0.0000001"
+    assert validation.coordinate(Decimal("39.3"), "lat", 90) == "39.3"
+    with pytest.raises(InvalidParameterError):
+        validation.coordinate(Decimal("NaN"), "lat", 90)

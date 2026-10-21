@@ -93,8 +93,9 @@ class KrogerAPIError(Exception):
 
     #: True when the request may have changed data before it failed, so
     #: resending it could repeat the change. Only a timeout, a lost
-    #: connection, a 5xx, or an unreadable 2xx on a request that changes data
-    #: (such as a cart add) can leave the outcome unknown.
+    #: connection, or a 5xx on a request that changes data (such as a cart
+    #: add), or an unreadable 2xx on one that reads its response body, can
+    #: leave the outcome unknown.
     outcome_unknown = False
 
     def __init__(self, message: str, *args: Any, **kwargs: Any):

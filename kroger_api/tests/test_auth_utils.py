@@ -144,3 +144,16 @@ def test_env_file_supplies_only_kroger_settings_from_the_working_directory(tmp_p
     assert os.environ["KROGER_USER_ZIP_CODE"] == "45202"
     assert os.environ["KROGER_CLIENT_ID"] == "from-environment"
     assert "HTTPS_PROXY" not in os.environ
+
+
+def test_required_variables_are_read_from_the_env_file(tmp_path, monkeypatch):
+    from kroger_api.utils.env import load_and_validate_env
+
+    (tmp_path / ".env").write_text("MY_APP_SETTING=on\nOTHER_SETTING=off\n")
+    for name in ("MY_APP_SETTING", "OTHER_SETTING"):
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
+    monkeypatch.chdir(tmp_path)
+
+    assert load_and_validate_env(["MY_APP_SETTING"]) == {"MY_APP_SETTING": "on"}
+    assert "OTHER_SETTING" not in os.environ

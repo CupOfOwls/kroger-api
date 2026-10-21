@@ -38,15 +38,13 @@ DEFAULT_TIMEOUT = 30
 # between the check and the request.
 EXPIRY_MARGIN_SECONDS = 60
 
-# urllib3 2 raises ProxyError only before it has connected to the proxy
-# (connectionpool checks conn.has_connected_to_proxy). urllib3 1.26 also
-# raises it for a connection lost after the request went through the proxy.
-_PROXY_ERROR_MEANS_NOT_SENT = int(urllib3.__version__.split(".")[0]) >= 2
-
 # Failures that happen while the connection is being set up, so before any
 # part of the request is sent: DNS failures and refused connections
-# (NewConnectionError), and a certificate the client does not accept, which
-# fails the TLS handshake.
+# (NewConnectionError), also to a proxy, and a certificate the client does
+# not accept, which fails the TLS handshake. ProxyError alone is not one of
+# them: urllib3 1.26 and 2 both raise it for a connection through a proxy
+# that is lost after the request was sent (urllib3 2 resets
+# has_connected_to_proxy when http.client closes the failed connection).
 _SETUP_FAILURES = (urllib3.exceptions.NewConnectionError, ssl.SSLCertVerificationError, _HostnameMismatchError)
 
 
@@ -413,12 +411,11 @@ class KrogerClient:
         """False if the request certainly never reached the server, else None (unknown)
 
         DNS failures, refused connections, and rejected certificates fail
-        before anything is sent. Other TLS errors are not certain: urllib3
-        reports a TLS error while it reads the response the same way as one
-        in the handshake, after the request has been sent.
+        before anything is sent. Other TLS and proxy errors are not certain:
+        urllib3 reports a TLS error while it reads the response the same way
+        as one in the handshake, and a connection through a proxy lost after
+        sending the same way as a proxy it could not use.
         """
-        if _PROXY_ERROR_MEANS_NOT_SENT and isinstance(error, requests.exceptions.ProxyError):
-            return False
         if any(isinstance(cause, _SETUP_FAILURES) for cause in _causes(error)):
             return False
         return None

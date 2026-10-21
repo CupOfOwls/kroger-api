@@ -443,18 +443,21 @@ def test_cart_add_that_never_connected_is_safe_to_resend(kroger, requests_mock):
     assert "may have reached Kroger" not in str(excinfo.value)
 
 
-def test_proxy_error_means_not_sent_only_with_urllib3_2(kroger, requests_mock, monkeypatch):
-    import kroger_api.client as client_module
-    lost = requests.exceptions.ProxyError("Unable to connect to proxy: Connection reset by peer")
+def test_proxy_error_means_not_sent_only_for_a_refused_connection(kroger, requests_mock):
+    import urllib3
 
-    monkeypatch.setattr(client_module, "_PROXY_ERROR_MEANS_NOT_SENT", True)
-    requests_mock.put(CART_URL, exc=lost)
+    refused = urllib3.exceptions.NewConnectionError(None, "Failed to establish a new connection: [Errno 111] Connection refused")
+    unreachable = urllib3.exceptions.ProxyError("Unable to connect to proxy", refused)
+    requests_mock.put(CART_URL, exc=requests.exceptions.ProxyError(
+        urllib3.exceptions.MaxRetryError(None, CART_URL, reason=unreachable)))
     with pytest.raises(APIConnectionError) as excinfo:
         kroger.cart.add_to_cart(CART_ITEM)
     assert excinfo.value.request_sent is False
 
-    # urllib3 1.26 also uses ProxyError for a connection lost after sending
-    monkeypatch.setattr(client_module, "_PROXY_ERROR_MEANS_NOT_SENT", False)
+    # urllib3 also raises ProxyError for a tunnelled connection lost after sending
+    lost = urllib3.exceptions.ProxyError("Unable to connect to proxy", ConnectionResetError(104, "Connection reset by peer"))
+    requests_mock.put(CART_URL, exc=requests.exceptions.ProxyError(
+        urllib3.exceptions.MaxRetryError(None, CART_URL, reason=lost)))
     with pytest.raises(APIConnectionError) as excinfo:
         kroger.cart.add_to_cart(CART_ITEM)
     assert excinfo.value.request_sent is None

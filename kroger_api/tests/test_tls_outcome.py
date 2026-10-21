@@ -8,6 +8,7 @@ the handshake, may be reported as never sent.
 import datetime
 import ipaddress
 import os
+import select
 import socket
 import ssl
 import threading
@@ -69,18 +70,24 @@ def certificate(tmp_path):
     return str(cert_path), str(key_path)
 
 
-def _serve_once(certificate, received):
-    """Accept one TLS connection, read one request, then write bytes outside TLS
-
-    The plaintext bytes make the client's TLS layer fail while it reads the
-    response, after the whole request has arrived. Returns the port.
-    """
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(*certificate)
+def _listener():
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
     listener.settimeout(10)
+    return listener
+
+
+def _serve_once(certificate, received, after="garbage"):
+    """Accept one TLS connection and read one request, then break the connection
+
+    after="garbage" writes bytes outside TLS, so the client's TLS layer fails
+    while it reads the response; after="close" closes the connection without
+    an answer. Either way the whole request has arrived. Returns the port.
+    """
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(*certificate)
+    listener = _listener()
 
     def serve():
         try:
@@ -106,13 +113,52 @@ def _serve_once(certificate, received):
             while len(body) < length:
                 body += conn.recv(65536)
             received.append(head.split(b"\r\n")[0].decode())
-            # Write to the socket under the TLS layer, so the bytes are not a TLS record
-            os.write(conn.fileno(), b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+            if after == "garbage":
+                # Write to the socket under the TLS layer, so the bytes are not a TLS record
+                os.write(conn.fileno(), b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
             time.sleep(0.2)
         listener.close()
 
     threading.Thread(target=serve, daemon=True).start()
     return listener.getsockname()[1]
+
+
+def _connect_proxy(target_port):
+    """An HTTP proxy that tunnels one CONNECT request to target_port. Returns its port."""
+    listener = _listener()
+
+    def run():
+        try:
+            client, _ = listener.accept()
+        except OSError:
+            return
+        data = b""
+        while b"\r\n\r\n" not in data:
+            data += client.recv(4096)
+        upstream = socket.create_connection(("127.0.0.1", target_port))
+        client.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+        sockets = [client, upstream]
+        while True:
+            readable, _, _ = select.select(sockets, [], [], 5)
+            chunks = [(s, s.recv(65536)) for s in readable]
+            if not readable or any(not chunk for _, chunk in chunks):
+                break
+            for s, chunk in chunks:
+                (upstream if s is client else client).sendall(chunk)
+        client.close()
+        upstream.close()
+        listener.close()
+
+    threading.Thread(target=run, daemon=True).start()
+    return listener.getsockname()[1]
+
+
+def _closed_port():
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
 
 
 def _cart_add_error(port, monkeypatch):
@@ -140,5 +186,28 @@ def test_rejected_certificate_means_the_request_was_never_sent(certificate, monk
     error = _cart_add_error(_serve_once(certificate, received), monkeypatch)
     assert received == []
     assert "CERTIFICATE_VERIFY_FAILED" in error.message
+    assert error.request_sent is False
+    assert error.outcome_unknown is False
+
+
+def test_connection_lost_after_sending_through_a_proxy_leaves_the_outcome_unknown(certificate, monkeypatch):
+    # urllib3 reports this as ProxyError, like a proxy it could not use
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", certificate[0])
+    received = []
+    server_port = _serve_once(certificate, received, after="close")
+    monkeypatch.delenv("NO_PROXY")
+    monkeypatch.setenv("HTTPS_PROXY", f"http://127.0.0.1:{_connect_proxy(server_port)}")
+    error = _cart_add_error(server_port, monkeypatch)
+    assert received == ["PUT /v1/cart/add HTTP/1.1"]
+    assert type(error.__cause__).__name__ == "ProxyError"
+    assert error.request_sent is None
+    assert error.outcome_unknown is True
+
+
+def test_refused_proxy_connection_means_the_request_was_never_sent(monkeypatch):
+    monkeypatch.delenv("NO_PROXY")
+    monkeypatch.setenv("HTTPS_PROXY", f"http://127.0.0.1:{_closed_port()}")
+    error = _cart_add_error(_closed_port(), monkeypatch)
+    assert type(error.__cause__).__name__ == "ProxyError"
     assert error.request_sent is False
     assert error.outcome_unknown is False

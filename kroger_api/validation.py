@@ -13,8 +13,8 @@ The constants are public so that other packages, such as kroger-mcp, can
 publish the same limits in their own schemas.
 """
 
-import math
 import re
+from decimal import Decimal
 from typing import Any, Dict, List
 
 from kroger_api.errors import InvalidParameterError
@@ -157,14 +157,19 @@ DECIMAL_PATTERN = r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)"
 def coordinate(value: Any, param: str, limit: float) -> str:
     """A latitude (limit 90) or longitude (limit 180) as the decimal string the API expects.
 
-    Surrounding whitespace is removed from a string.
+    Surrounding whitespace is removed from a string. A number is written in
+    plain decimal notation, never with an exponent.
     """
     if isinstance(value, str):
         text = value.strip()
         if not re.fullmatch(DECIMAL_PATTERN, text):
             raise InvalidParameterError(param, value, "must be a decimal number")
-    elif isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
-        text = str(value)
+    elif isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
+        # repr gives the shortest digits that round-trip a float
+        number = Decimal(repr(value)) if isinstance(value, float) else Decimal(value)
+        if not number.is_finite():
+            raise InvalidParameterError(param, value, "must be a decimal number")
+        text = format(number, "f")
     else:
         raise InvalidParameterError(param, value, "must be a decimal number")
     if not -limit <= float(text) <= limit:

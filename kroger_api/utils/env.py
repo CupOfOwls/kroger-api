@@ -4,7 +4,7 @@ This module provides functions to load and validate environment variables.
 """
 import logging
 import os
-from typing import List, Dict
+from typing import Dict, Iterable, List
 from dotenv import dotenv_values
 
 from kroger_api.errors import ConfigurationError
@@ -12,16 +12,18 @@ from kroger_api.errors import ConfigurationError
 logger = logging.getLogger(__name__)
 
 
-def load_env_file() -> None:
+def load_env_file(names: Iterable[str] = ()) -> None:
     """
     Load the KROGER_* settings from a .env file in the working directory, if there is one
 
     Only the working directory is searched, not its parents, and only names
-    that start with KROGER_ are read. An MCP host can start a server in any
-    project's directory, and that project's other settings, such as a proxy
-    or a CA bundle, must not change how this library connects. Variables
-    that are already set in the environment keep their values.
+    that start with KROGER_ are read, plus any listed in names. An MCP host
+    can start a server in any project's directory, and that project's other
+    settings, such as a proxy or a CA bundle, must not change how this
+    library connects. Variables that are already set in the environment keep
+    their values.
     """
+    names = set(names)
     try:
         path = os.path.join(os.getcwd(), ".env")
         if not os.path.isfile(path):
@@ -31,13 +33,16 @@ def load_env_file() -> None:
         logger.warning("Could not read the .env file in the working directory: %s", e)
         return
     for name, value in values.items():
-        if name.startswith("KROGER_") and value is not None and name not in os.environ:
+        if (name.startswith("KROGER_") or name in names) and value is not None and name not in os.environ:
             os.environ[name] = value
 
 
 def load_and_validate_env(required_vars: List[str]) -> Dict[str, str]:
     """
-    Load environment variables from .env file and validate required variables
+    Load settings from the .env file in the working directory, then check that required variables are set
+
+    The .env file supplies the KROGER_* settings and the names in
+    required_vars; see load_env_file.
     
     Args:
         required_vars: List of required environment variable names
@@ -49,7 +54,7 @@ def load_and_validate_env(required_vars: List[str]) -> Dict[str, str]:
         ConfigurationError: If any required environment variables are missing
             (a ValueError subclass)
     """
-    load_env_file()
+    load_env_file(required_vars)
     
     # Check if required environment variables are set
     missing_vars = []
