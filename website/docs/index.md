@@ -16,10 +16,10 @@ Kroger is a family of grocery banners across the United States. The Public API r
 
 ## Where to start
 
-| You want to...                                               | Go to                                                                        |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| Make your first API call and end with an item in a real cart | [Tutorial: Use the Kroger API in Python](get-started/use-the-kroger-api.mdx) |
-| Give an AI assistant grocery capabilities                    | [Lab: Build an AI agent with kroger-mcp](building-ai-agents/agent-lab.mdx)   |
-| Solve a specific task (auth flows, refresh, rate limits)     | [How-to guides](how-to/choose-an-auth-flow.md)                               |
-| Understand how the client is put together                    | [Concepts](concepts/client-architecture.md)                                  |
-| Look something up                                            | [Reference](reference/mcp-tools.md)                                          |
+| You want to...                                                   | Go to                                                                        |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Make your first API call and end with an item in a real cart     | [Tutorial: Use the Kroger API in Python](get-started/use-the-kroger-api.mdx) |
+| Give an AI assistant grocery capabilities                        | [Lab: Build an AI agent with kroger-mcp](building-ai-agents/agent-lab.mdx)   |
+| Solve a specific task (auth flows, refresh, errors, rate limits) | [How-to guides](how-to/choose-an-auth-flow.md)                               |
+| Understand how the client is put together                        | [Concepts](concepts/client-architecture.md)                                  |
+| Look something up                                                | [Reference](reference/mcp-tools.md)                                          |

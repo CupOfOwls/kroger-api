@@ -1,5 +1,5 @@
 ---
-sidebar_position: 2
+sidebar_position: 3
 title: Glossary
 description: "Definitions of Kroger API and MCP terms used throughout these docs: locationId, UPC, modality, scopes, tool calls, and more."
 ---
@@ -11,6 +11,10 @@ description: "Definitions of Kroger API and MCP terms used throughout these docs
 **approval loop**: The MCP client behavior of pausing every tool call for explicit human consent. See [How MCP approval and scopes work](../concepts/mcp-approval.md).
 
 **client credentials**: The OAuth2 flow in which the app authenticates as itself, with no user. Grants access to public data only.
+
+**correlation ID**: The value of the `X-Correlation-Id` header that the Kroger API sends with each response. It identifies the request in Kroger's logs, so include it when you report a problem. `kroger-api` errors carry it as `correlation_id`.
+
+**error result**: An MCP tool result with `isError` set to `true`. `kroger-mcp` tools return one when they fail, with the problem and the next step as text, and the details as structured content. See [error results](mcp-tools.md#error-results).
 
 **locationId**: The identifier for one specific store. Product prices, availability, and aisle locations only exist relative to a `locationId`.
 

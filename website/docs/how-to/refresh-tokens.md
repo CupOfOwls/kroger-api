@@ -10,7 +10,9 @@ Kroger access tokens expire after 30 minutes. If a script runs longer than this 
 
 ## Default behavior
 
-Tokens obtained through `authenticate_user` are saved to a local token file with their refresh token. The library loads the stored token on later runs and refreshes it if necessary. The browser only opens if there is no refresh token available.
+Tokens obtained through `authenticate_user` are saved to a local token file with their refresh token, and with `expires_at`, the time they expire. The library loads the stored token on later runs and refreshes it if it has expired. The browser only opens if there is no refresh token available.
+
+During a run, a request that gets `401` because the token has expired or been revoked is retried once: the client refreshes a user token, or requests a new client-credentials token, and resends the request. If that fails, the client raises `AuthenticationError`, and its `note` says why. See [401 recovery](../reference/errors.md#401-recovery).
 
 ## Refresh explicitly
 
@@ -20,22 +22,23 @@ For a long-running process, validate and refresh at your own checkpoints instead
 from kroger_api import KrogerAPI
 
 kroger = KrogerAPI()
-# Tests the stored access token and, if it no longer validates,
+# Loads the stored token into the client and, if it has expired,
 # refreshes it using the stored refresh token.
-kroger.authorization.refresh_token_if_needed()
+token_info = kroger.authorization.refresh_token_if_needed()
+if token_info is None:
+    print("No usable token. Sign the user in again.")
 ```
 
-Or test-then-refresh, like `examples/token_refresh_example.py`:
+`refresh_token_if_needed` returns `None` when there is no stored token, or when Kroger rejects the refresh token. It raises other errors, such as `APIConnectionError` for a network failure, so you can tell them apart from a sign-in that must be repeated.
+
+To check a token that is already on the client, call `test_current_token()`:
 
 ```python
-from kroger_api.token_storage import load_token
-
-token_info = load_token(".kroger_token_user.json")
-if token_info:
-    kroger.client.token_info = token_info
-    if not kroger.test_current_token():
-        kroger.authorization.refresh_token(token_info["refresh_token"])
+if not kroger.test_current_token():
+    print("The token has expired and cannot be refreshed. Sign the user in again.")
 ```
+
+The check compares the token's expiry time with the clock and makes no API call, unless an expired token has to be refreshed. A token that Kroger revoked before it expired still passes this check; the next request then gets `401`, which the client handles as the previous section describes.
 
 ## Notes
 

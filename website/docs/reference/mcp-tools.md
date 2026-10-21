@@ -1,12 +1,12 @@
 ---
 sidebar_position: 1
 title: kroger-mcp tool reference
-description: "Every tool the kroger-mcp server exposes, grouped by family, with its purpose and whether it requires user authentication."
+description: "Every tool the kroger-mcp server exposes, grouped by family, with whether it requires user authentication, the valid parameter values, and the error results tools return."
 ---
 
 # kroger-mcp tool reference
 
-Every tool the [kroger-mcp](https://github.com/CupOfOwls/kroger-mcp) server exposes. **Auth Required: Yes** means the tool acts on a user's Kroger account and needs the user OAuth flow, started with `start_authentication` and finished with `complete_authentication`; **No** means it rides the client-credentials token. See [How MCP approval and scopes work](../concepts/mcp-approval.md) for what that distinction means in practice.
+Every tool the [kroger-mcp](https://github.com/CupOfOwls/kroger-mcp) server exposes. **Auth Required: Yes** means the tool acts on a user's Kroger account and needs the user OAuth flow, started with `start_authentication` and finished with `complete_authentication`; **No** means it rides the client-credentials token. See [How MCP approval and scopes work](../concepts/mcp-approval.md) for what that distinction means in practice. A tool that fails returns an [error result](#error-results), and each tool's input schema declares the [valid parameter values](#parameter-values).
 
 ## Location tools
 
@@ -56,12 +56,14 @@ The Kroger Public API does not offer cart _viewing_, so the server keeps a local
 
 ## Profile tools
 
-| Tool                      | Description                                      | Auth Required |
-| ------------------------- | ------------------------------------------------ | ------------- |
-| `get_user_profile`        | Get the authenticated user's profile information | Yes           |
-| `test_authentication`     | Test whether the authentication token is valid   | Yes           |
-| `get_authentication_info` | Get detailed authentication status               | Yes           |
-| `force_reauthenticate`    | Clear tokens and force re-authentication         | No            |
+| Tool                      | Description                                                              | Auth Required |
+| ------------------------- | ------------------------------------------------------------------------ | ------------- |
+| `get_user_profile`        | Get the authenticated user's profile information                         | Yes           |
+| `test_authentication`     | Test whether the saved sign-in is valid, refreshing it if it has expired | No            |
+| `get_authentication_info` | Get detailed authentication status                                       | No            |
+| `force_reauthenticate`    | Delete the saved sign-in, so the user can sign in again                  | No            |
+
+`test_authentication` and `get_authentication_info` report a user who is not signed in as a normal result, not an error. `get_user_profile` needs a sign-in that grants the `profile.compact` scope, and `start_authentication` requests only `product.compact` and `cart.basic:write`.
 
 ## Authentication tools
 
@@ -75,3 +77,97 @@ The Kroger Public API does not offer cart _viewing_, so the server keeps a local
 | Tool                   | Description                          | Auth Required |
 | ---------------------- | ------------------------------------ | ------------- |
 | `get_current_datetime` | Get the current system date and time | No            |
+
+## Parameter values
+
+Each tool's input schema declares the values the Kroger API accepts, so an MCP client can show them to the model. A call with an invalid value fails before the server sends any request.
+
+| Parameter                        | Tools                                                       | Valid values                                                                                  |
+| -------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `location_id`                    | Location and product tools                                  | Eight letters or digits, such as `01400513`. Product tools default to the preferred location. |
+| `product_id`                     | Product and cart tools                                      | 13 digits, such as `0001111041700`                                                            |
+| `search_term`, `searches[].term` | `search_products`, `bulk_search_products`                   | At least three characters and at most eight words, separated by single spaces                 |
+| `limit`                          | `search_products`, `bulk_search_products`                   | 1 to 50, default 10                                                                           |
+| `fulfillment`                    | `search_products`, `bulk_search_products`                   | `ais` (in store), `csp` (curbside pickup), `dth` (delivery to home), or `sth` (ship to home)  |
+| `brand`                          | `search_products`, `bulk_search_products`                   | A brand name, case-sensitive, such as `Kroger`                                                |
+| `searches`                       | `bulk_search_products`                                      | 1 to 25 searches. Each takes `term`, `limit`, `fulfillment`, and `brand`, and no other keys.  |
+| `zip_code`                       | `search_locations`                                          | Five digits. ZIP+4 is not accepted. Defaults to `KROGER_USER_ZIP_CODE`.                       |
+| `radius_in_miles`                | `search_locations`                                          | 1 to 100, default 10                                                                          |
+| `limit`                          | `search_locations`                                          | 1 to 200, default 10                                                                          |
+| `chain_name`                     | `get_chain_details`, `check_chain_exists`                   | A chain name from `list_chains`, such as `LOAF 'N JUG`                                        |
+| `department_id`                  | `get_department_details`, `check_department_exists`         | Two letters or digits, from `list_departments`                                                |
+| `quantity`                       | `add_items_to_cart`, `bulk_add_to_cart`                     | 1 or more, default 1                                                                          |
+| `modality`                       | `add_items_to_cart`, `bulk_add_to_cart`, `remove_from_cart` | `PICKUP` or `DELIVERY`, uppercase. Default `PICKUP`.                                          |
+| `items`                          | `bulk_add_to_cart`                                          | At least one item. Each takes `product_id`, `quantity`, and `modality`, and no other keys.    |
+| `limit`                          | `view_order_history`                                        | 1 to 50, default 10                                                                           |
+
+## Error results
+
+A tool that fails returns an MCP tool result with `isError` set to `true`. The model reads it like any other result, so it can correct its next call.
+
+The text content says what went wrong, then `Next step:` and what to do, often naming the tool to call. A client that shows the model only text still passes on everything the model needs:
+
+```text
+Invalid arguments for add_items_to_cart:
+  - quantity: Input should be greater than or equal to 1 (got -5)
+  - modality: Input should be 'PICKUP' or 'DELIVERY' (got 'BOAT')
+The tool did not run, so no request was sent.
+Next step: Correct the arguments listed and call the tool again. The tool's input schema lists the valid values.
+```
+
+The structured content holds an `error` object with the same message and the details as fields. For a Kroger API error, the fields come from the `kroger-api` exception's [`to_dict()`](errors.md#the-to_dict-method):
+
+```json
+{
+  "error": {
+    "type": "not_found",
+    "message": "Kroger API error 404 Not Found: (no error message in the response body)\n  request: GET /v1/chains/NOTACHAIN\n  correlation id: akam_1792607141_94d124d9-7609-4e01-a162-37dadf084c64\n  hint: No chain has this name. Get the valid names from the chains list.",
+    "status_code": 404,
+    "status_text": "Not Found",
+    "kroger_code": null,
+    "kroger_message": null,
+    "method": "GET",
+    "url": "https://api.kroger.com/v1/chains/NOTACHAIN",
+    "correlation_id": "akam_1792607141_94d124d9-7609-4e01-a162-37dadf084c64",
+    "retry_after": null,
+    "note": null,
+    "hint": "No chain has this name. Get the valid names from the chains list.",
+    "response_body": null,
+    "next_step": "Get the valid chain names with list_chains.",
+    "tool": "get_chain_details"
+  }
+}
+```
+
+Every `error` object has `type`, `message`, `next_step` (which can be `null`), and `tool`. The `type` is one of these:
+
+| `type`                                          | Meaning                                                                                                                                          |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `invalid_arguments`                             | Arguments do not match the input schema. `errors` lists each one with `param`, `problem`, `error_code`, and `input`.                             |
+| `invalid_parameter`                             | A value passed the schema but not a `kroger-api` check, such as a search term of more than eight words. Has `param`, `value`, and `requirement`. |
+| `location_required`                             | A product tool got no `location_id`, and no preferred location is set.                                                                           |
+| `authentication_required`                       | The user is not signed in, or the sign-in has expired and cannot be renewed.                                                                     |
+| `authentication_not_started`                    | `complete_authentication` was called with no sign-in in progress, for example after a server restart.                                            |
+| `authorization_failed`                          | The redirect URL reports that the user refused access. Has `oauth_error` and `oauth_error_description`.                                          |
+| `invalid_redirect_url`, `state_mismatch`        | The URL passed to `complete_authentication` has no code, or comes from another sign-in.                                                          |
+| `bad_request`                                   | The Kroger API answered `400`.                                                                                                                   |
+| `authentication_error`                          | The Kroger API answered `401`. From the token endpoint, the server's client ID or secret is wrong.                                               |
+| `permission_denied`                             | The Kroger API answered `403`, usually because the token lacks the scope.                                                                        |
+| `not_found`                                     | The Kroger API answered `404`, or a product search came back empty because its `location_id` does not exist.                                     |
+| `rate_limited`                                  | The Kroger API answered `429`. The limits are daily, so the next step is to stop, not retry.                                                     |
+| `server_error`, `api_error`, `invalid_response` | The Kroger API answered `5xx`, another error status, or a body that is not JSON.                                                                 |
+| `connection_error`, `timeout`                   | The Kroger API could not be reached, or did not answer within 30 seconds.                                                                        |
+| `configuration_error`                           | A server setting, such as `KROGER_CLIENT_SECRET` or `KROGER_USER_ZIP_CODE`, is missing or invalid.                                               |
+| `local_state_error`                             | The cart, order history, or preferences file cannot be read or written. Has `path`.                                                              |
+| `empty_cart`                                    | `mark_order_placed` was called with nothing in the local cart tracking.                                                                          |
+| `all_searches_failed`                           | Every search of a `bulk_search_products` call failed. `results` holds each search's error.                                                       |
+| `no_images`, `image_download_failed`            | The product has no image to return, or the download failed.                                                                                      |
+| `unexpected_response`                           | A Kroger API response lacked the data the API documents.                                                                                         |
+| `internal_error`                                | An unexpected exception in the server, probably a bug. Has `exception_type`.                                                                     |
+
+These cases are not errors:
+
+- A search that finds nothing returns `count: 0` and a `message`.
+- `get_preferred_location` with no preferred location returns `preferred_location_id: null`.
+- A product search can return `api_warnings` from the Kroger API, such as `The following productIds were not found: 9999999999999`.
+- If the Kroger cart accepts items but the server cannot save its local cart tracking, the result is a success with a `warning`, so the agent does not add the items a second time.

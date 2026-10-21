@@ -24,6 +24,7 @@ const sidebars = {
       items: [
         "how-to/choose-an-auth-flow",
         "how-to/refresh-tokens",
+        "how-to/handle-api-errors",
         "how-to/handle-rate-limits",
       ],
     },
@@ -37,6 +38,7 @@ const sidebars = {
       label: "Reference",
       items: [
         "reference/mcp-tools",
+        "reference/errors",
         "reference/glossary",
         "reference/changelog",
       ],

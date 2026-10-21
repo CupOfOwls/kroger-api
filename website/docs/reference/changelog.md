@@ -1,5 +1,5 @@
 ---
-sidebar_position: 3
+sidebar_position: 4
 title: Changelog and versions
 description: "Where releases are recorded for kroger-api and kroger-mcp, and the versioning scheme both packages follow."
 ---

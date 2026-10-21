@@ -1,5 +1,5 @@
 ---
-sidebar_position: 3
+sidebar_position: 4
 title: Handle rate limits and pagination
 description: "Work within the Kroger Public API's daily rate limits and paginate product results with filter.limit and filter.start."
 ---
@@ -37,6 +37,20 @@ Design around these two caveats:
 
 If you use the MCP server, `bulk_search_products` can run up to 25 searches in a single tool call. This reduces round trips through the agent approval loop while keeping the cost against your daily rate limit the same.
 
-## Backing off
+## Stop when the limit is reached
 
-The API returns HTTP `429` when your budget is exhausted. This is a daily limit rather than a temporary issue, so exponential backoff will not work. Log the count, stop the run, and resume after the budget resets.
+The API returns HTTP `429` when your budget is exhausted, and `kroger-api` raises `RateLimitError`. This is a daily limit rather than a temporary issue, so exponential backoff will not work. Log the count, stop the run, and resume after the budget resets.
+
+```python
+from kroger_api import RateLimitError
+
+try:
+    products = kroger.product.search_products(term="cereal", location_id=location_id)
+except RateLimitError as e:
+    print(f"Daily rate limit reached for {e.url}. Resume after it resets.")
+    if e.retry_after is not None:
+        print(f"The API asked for a wait of {e.retry_after:g} seconds.")
+    raise
+```
+
+`retry_after` holds the `Retry-After` header in seconds when the API sends one. Through `kroger-mcp`, the same response is an [error result](../reference/mcp-tools.md#error-results) of type `rate_limited`, whose next step tells the agent to stop instead of retrying.

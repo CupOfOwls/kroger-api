@@ -34,6 +34,14 @@ The client writes every token it obtains to a file, named per flow (and per scop
 
 The token directory is sensitive state on disk. Token files are credentials; the [refresh guide](../how-to/refresh-tokens.md) closes on the same warning: do not commit them.
 
+## Errors carry the response
+
+The Kroger API reports a problem in several ways, depending on which layer handles the request: an error object with a code and reason from the Products and Locations APIs, an OAuth error from the token endpoint, a bare `{"message": "Unauthorized"}` from the API gateway, or an empty body for most `404` responses. An exception that only said "400 Client Error" would discard all of that, so each exception keeps the parsed code and reason, the request, the correlation ID, and the body, and adds a hint where the cause is known. The [errors reference](../reference/errors.md) lists what each one carries.
+
+The exception classes follow HTTP status codes because a caller decides what to do from the status: correct the request after a `400`, sign in again after a `401`, stop after a `429`, and retry after a `5xx`. Each class also derives from the matching `requests` exception, so code written for earlier versions keeps working.
+
+Some mistakes produce no error at all. The Kroger API ignores a `fulfillment` value it does not know, and a location search `limit` of `0`, and returns results that look valid but are not filtered. That is why the client checks arguments before it sends a request: a check is the only place such a mistake can surface. The constraints are public constants, so `kroger-mcp` publishes the same limits in its tool schemas.
+
 ## MCP system
 
-Authentication, storage, and resource groups are separable. This allows [kroger-mcp](https://github.com/CupOfOwls/kroger-mcp) to wrap each client capability as an MCP tool. The MCP server handles the agent side (tool listing and tool calls) and passes Kroger requests to kroger-api. The [approval model](mcp-approval.md) applies to each call that crosses that boundary.
+Authentication, storage, and resource groups are separable. This allows [kroger-mcp](https://github.com/CupOfOwls/kroger-mcp) to wrap each client capability as an MCP tool. The MCP server handles the agent side (tool listing and tool calls) and passes Kroger requests to kroger-api. The [approval model](mcp-approval.md) applies to each call that crosses that boundary. When a call fails, the server turns the `kroger-api` exception into an MCP [error result](../reference/mcp-tools.md#error-results), with the same details and a next step that names the tool to use, so the agent can correct itself.

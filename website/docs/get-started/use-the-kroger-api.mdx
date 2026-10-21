@@ -98,7 +98,7 @@ Run the script. You should see a number around `1800`. The token is valid for 30
       feedback: (
         <>
           The token is 30 minutes old at most, so expiry is not the cause. Even
-          a new client-credentials token will trigger the same <code>401</code>.
+          a new client-credentials token will trigger the same <code>403</code>.
           The failure is due to the specific data you are requesting.
         </>
       ),
@@ -227,10 +227,11 @@ print("Added to cart:", first_item["description"])
       feedback: (
         <>
           The stored token includes a refresh token, and kroger-api even
-          attempts this refresh automatically when a call fails. An error that
-          still surfaces usually means the refresh token is missing or stale, so
-          refresh (or re-authenticate) explicitly. The refresh-tokens guide
-          under Next steps covers this.
+          attempts this refresh automatically when a call fails. An{" "}
+          <code>AuthenticationError</code> that still surfaces says in its{" "}
+          <code>note</code> why the refresh did not work: usually the refresh
+          token is missing or stale, so refresh (or re-authenticate) explicitly.
+          The refresh-tokens guide under Next steps covers this.
         </>
       ),
     },
@@ -278,10 +279,12 @@ This chain handles four objectives: both authentication flows, the location-to-p
 
 - [Choose an auth flow](../how-to/choose-an-auth-flow.md)
 - [Refresh tokens automatically](../how-to/refresh-tokens.md)
+- [Handle API errors](../how-to/handle-api-errors.md)
 - [Handle rate limits and pagination](../how-to/handle-rate-limits.md)
 
 **Reference:**
 
+- [kroger-api errors reference](../reference/errors.md)
 - [Glossary of Kroger API terms](../reference/glossary.md)
 
 **Explanation:**

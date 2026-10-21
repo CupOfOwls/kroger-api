@@ -113,7 +113,9 @@ Enter these prompts one by one:
 1. _"Search that store for oat milk."_ (product tools)
 1. _"Add two cartons of the cheapest one to my cart."_ (cart tools)
 
-The first cart operation needs a user-authorized token, and the server cannot open a browser for you. Instead, the agent calls `start_authentication`, which returns a Kroger sign-in link. Open the link, approve access, and copy the URL Kroger redirects you to. Give that URL back to the agent, and it finishes the flow with `complete_authentication`. This grants the same `cart.basic:write` scope as [Step 5 of the API tutorial](../get-started/use-the-kroger-api.mdx), through an exchange built for chat instead of a local callback server.
+The first cart operation needs a user-authorized token, and the server cannot open a browser for you. The cart tool returns an error result of type `authentication_required`, whose next step tells the agent to call `start_authentication`, which returns a Kroger sign-in link. Open the link, approve access, and copy the URL Kroger redirects you to. Give that URL back to the agent, and it finishes the flow with `complete_authentication`. This grants the same `cart.basic:write` scope as [Step 5 of the API tutorial](../get-started/use-the-kroger-api.mdx), through an exchange built for chat instead of a local callback server.
+
+A failed tool call shows in the trace as an error result. Its text says what went wrong and what to do next, such as a `location_id` that is not eight characters or a search term that is too long, and the agent usually corrects the call by itself. The [error results](../reference/mcp-tools.md#error-results) section of the tool reference lists every error type.
 
 <Quiz
   title="Knowledge check 1"
