@@ -3,7 +3,7 @@ from typing import Dict, Optional, Any
 
 from kroger_api.client import KrogerClient
 from kroger_api.errors import BadRequestError
-from kroger_api.token_storage import USER_TOKEN_FILE, get_refresh_token, load_token
+from kroger_api.token_storage import USER_TOKEN_FILE, load_token
 
 logger = logging.getLogger(__name__)
 
@@ -50,18 +50,20 @@ class AuthorizationAPI:
         """
         return self.client.get_token_with_client_credentials(scope)
     
-    def get_token_with_authorization_code(self, code: str, code_verifier: Optional[str] = None) -> Dict[str, Any]:
+    def get_token_with_authorization_code(self, code: str, code_verifier: Optional[str] = None,
+                                          token_file: Optional[str] = None) -> Dict[str, Any]:
         """
         Get an access token using an authorization code
         
         Args:
             code: The authorization code received from the redirect
             code_verifier: PKCE code verifier used during authorization (if PKCE was used)
+            token_file: The file to save the user token to (default USER_TOKEN_FILE)
             
         Returns:
             The token information
         """
-        return self.client.get_token_with_authorization_code(code, code_verifier)
+        return self.client.get_token_with_authorization_code(code, code_verifier, token_file)
     
     def refresh_token(self, refresh_token: str) -> Dict[str, Any]:
         """
@@ -97,18 +99,25 @@ class AuthorizationAPI:
         if not token_info:
             return None
 
-        # A refreshed token is saved back to the file it was loaded from
-        self.client.token_file = token_file
-        
+        # The client's token file changes only when its token comes from this
+        # file, so a token that cannot be used never redirects later saves.
         # Use the saved token while it is unexpired
         if not self.client.is_token_expired(token_info):
             self.client.token_info = token_info
+            self.client.token_file = token_file
             return token_info
             
-        refresh_token = token_info.get("refresh_token") or get_refresh_token(token_file)
+        refresh_token = token_info.get("refresh_token")
         if not refresh_token:
             return None
+        # A refreshed token is saved back to the file it was loaded from
+        previous_token_file = self.client.token_file
+        self.client.token_file = token_file
         try:
             return self.refresh_token(refresh_token)
         except BadRequestError:
+            self.client.token_file = previous_token_file
             return None
+        except Exception:
+            self.client.token_file = previous_token_file
+            raise

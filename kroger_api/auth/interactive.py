@@ -14,7 +14,7 @@ from ..utils.oauth import (
 from ..utils.env import get_redirect_uri
 from ..errors import KrogerAPIError
 from ..kroger_api import KrogerAPI
-from ..token_storage import USER_TOKEN_FILE, save_token
+from ..token_storage import USER_TOKEN_FILE
 
 def authenticate_user(scopes: str = "cart.basic:write profile.compact", 
                       token_file: str = USER_TOKEN_FILE, 
@@ -93,13 +93,9 @@ def authenticate_user(scopes: str = "cart.basic:write profile.compact",
         if auth_state != state:
             raise ValueError("State parameter mismatch. Possible CSRF attack.")
         
-        # Exchange the authorization code for an access token. The client
-        # saves it to the default user token file.
+        # Exchange the authorization code for an access token, saved to token_file
         print("Authorization code received, exchanging for access token...")
-        token_info = kroger.authorization.get_token_with_authorization_code(auth_code)
-        if token_file != USER_TOKEN_FILE:
-            kroger.client.token_file = token_file
-            save_token(token_info, token_file)
+        kroger.authorization.get_token_with_authorization_code(auth_code, token_file=token_file)
         
         print("Authentication successful.")
         return kroger

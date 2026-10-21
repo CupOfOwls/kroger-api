@@ -147,3 +147,32 @@ def test_brand_alone_is_not_a_product_search(kroger, requests_mock):
     with pytest.raises(InvalidParameterError) as excinfo:
         kroger.product.search_products(brand="Kroger", location_id="01400513")
     assert "brand alone" in excinfo.value.requirement
+
+
+@pytest.mark.parametrize(
+    "value, sent",
+    [
+        ("39.306346,-84.278902", "39.306346,-84.278902"),
+        ("39.306346,-84.278902\n", "39.306346,-84.278902"),
+        (" 39.3 , -84.2 ", "39.3,-84.2"),
+    ],
+)
+def test_lat_long_is_sent_without_surrounding_whitespace(value, sent):
+    assert validation.lat_long(value) == sent
+
+
+@pytest.mark.parametrize("value", ["nan,1", "inf,1", "1e1,2", "39.3,", "0x10,1"])
+def test_lat_long_needs_two_decimal_numbers(value):
+    with pytest.raises(InvalidParameterError):
+        validation.lat_long(value)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), True, None])
+def test_coordinate_rejects_non_numbers(value):
+    with pytest.raises(InvalidParameterError):
+        validation.coordinate(value, "lat", 90)
+
+
+def test_coordinate_accepts_numbers():
+    assert validation.coordinate(39.5, "lat", 90) == "39.5"
+    assert validation.coordinate(-84, "lon", 180) == "-84"

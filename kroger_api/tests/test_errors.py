@@ -443,6 +443,24 @@ def test_cart_add_that_never_connected_is_safe_to_resend(kroger, requests_mock):
     assert "may have reached Kroger" not in str(excinfo.value)
 
 
+def test_proxy_error_means_not_sent_only_with_urllib3_2(kroger, requests_mock, monkeypatch):
+    import kroger_api.client as client_module
+    lost = requests.exceptions.ProxyError("Unable to connect to proxy: Connection reset by peer")
+
+    monkeypatch.setattr(client_module, "_PROXY_ERROR_MEANS_NOT_SENT", True)
+    requests_mock.put(CART_URL, exc=lost)
+    with pytest.raises(APIConnectionError) as excinfo:
+        kroger.cart.add_to_cart(CART_ITEM)
+    assert excinfo.value.request_sent is False
+
+    # urllib3 1.26 also uses ProxyError for a connection lost after sending
+    monkeypatch.setattr(client_module, "_PROXY_ERROR_MEANS_NOT_SENT", False)
+    with pytest.raises(APIConnectionError) as excinfo:
+        kroger.cart.add_to_cart(CART_ITEM)
+    assert excinfo.value.request_sent is None
+    assert excinfo.value.outcome_unknown is True
+
+
 def test_cart_add_connection_lost_after_sending_leaves_the_outcome_unknown(kroger, requests_mock):
     requests_mock.put(CART_URL, exc=requests.exceptions.ConnectionError("Connection aborted: RemoteDisconnected"))
     with pytest.raises(APIConnectionError) as excinfo:
@@ -476,10 +494,17 @@ def test_reads_and_token_requests_are_always_safe_to_resend(kroger, requests_moc
     assert excinfo.value.outcome_unknown is False
 
 
-def test_cart_add_with_unreadable_success_body_must_not_be_resent(kroger, requests_mock):
+def test_cart_add_with_unreadable_success_body_succeeds(kroger, requests_mock):
+    # The cart add does not use the body, so the 2xx status is the whole result
+    requests_mock.put(CART_URL, status_code=200, text="<html>ok</html>")
+    assert kroger.cart.add_to_cart(CART_ITEM) is None
+
+
+def test_write_with_unreadable_success_body_must_not_be_resent(kroger, requests_mock):
+    # A request that changes data and reads the body: the 2xx says it was processed
     requests_mock.put(CART_URL, status_code=200, text="<html>ok</html>")
     with pytest.raises(InvalidResponseError) as excinfo:
-        kroger.cart.add_to_cart(CART_ITEM)
+        kroger.client._make_request("PUT", "/v1/cart/add", data={"items": CART_ITEM})
     assert excinfo.value.outcome_unknown is True
     assert "do not resend it" in str(excinfo.value)
 
@@ -577,3 +602,29 @@ def test_401_uses_a_refresh_token_that_another_process_saved(kroger, requests_mo
     assert kroger.identity.get_profile() == {"data": {"id": "user-1"}}
     assert requests_mock.request_history[-1].headers["Authorization"] == "Bearer new"
     assert load_token(".kroger_token_user.json")["refresh_token"] == "refresh-3"
+    # The used refresh token is never sent, so Kroger has no reuse to detect
+    token_requests = [r.text for r in requests_mock.request_history if r.url == TOKEN_URL]
+    assert token_requests == ["grant_type=refresh_token&refresh_token=refresh-2"]
+
+
+def test_401_falls_back_to_the_refresh_token_in_memory(kroger, requests_mock):
+    """The file holds an older refresh token, for example because a save failed"""
+    kroger.client.token_info["refresh_token"] = "refresh-2"
+    kroger.client.token_file = ".kroger_token_user.json"
+    save_token({"access_token": "old", "refresh_token": "refresh-1", "expires_in": 1800}, ".kroger_token_user.json")
+    requests_mock.get(f"{BASE}/v1/identity/profile",
+                      [GATEWAY_401, {"status_code": 200, "json": {"data": {"id": "user-1"}}}])
+
+    def token_response(request, context):
+        if "refresh_token=refresh-2" in request.text:
+            return {"access_token": "new", "refresh_token": "refresh-3", "expires_in": 1800}
+        context.status_code = 400
+        return {"error": "invalid_request", "error_description": "invalid refresh_token"}
+
+    requests_mock.post(TOKEN_URL, json=token_response)
+    assert kroger.identity.get_profile() == {"data": {"id": "user-1"}}
+    token_requests = [r.text for r in requests_mock.request_history if r.url == TOKEN_URL]
+    assert token_requests == [
+        "grant_type=refresh_token&refresh_token=refresh-1",
+        "grant_type=refresh_token&refresh_token=refresh-2",
+    ]

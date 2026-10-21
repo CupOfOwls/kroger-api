@@ -5,7 +5,7 @@ This module provides functions to load and validate environment variables.
 import logging
 import os
 from typing import List, Dict
-from dotenv import find_dotenv, load_dotenv
+from dotenv import dotenv_values
 
 from kroger_api.errors import ConfigurationError
 
@@ -14,16 +14,25 @@ logger = logging.getLogger(__name__)
 
 def load_env_file() -> None:
     """
-    Load settings from a .env file in the working directory, if there is one
+    Load the KROGER_* settings from a .env file in the working directory, if there is one
 
-    Variables that are already set in the environment keep their values.
-    The search starts in the working directory, not in the directory of the
-    code that calls this, so a .env file next to an installed package or in
-    a parent of the source tree is not read by accident.
+    Only the working directory is searched, not its parents, and only names
+    that start with KROGER_ are read. An MCP host can start a server in any
+    project's directory, and that project's other settings, such as a proxy
+    or a CA bundle, must not change how this library connects. Variables
+    that are already set in the environment keep their values.
     """
-    path = find_dotenv(usecwd=True)
-    if path:
-        load_dotenv(path)
+    try:
+        path = os.path.join(os.getcwd(), ".env")
+        if not os.path.isfile(path):
+            return
+        values = dotenv_values(path)
+    except OSError as e:
+        logger.warning("Could not read the .env file in the working directory: %s", e)
+        return
+    for name, value in values.items():
+        if name.startswith("KROGER_") and value is not None and name not in os.environ:
+            os.environ[name] = value
 
 
 def load_and_validate_env(required_vars: List[str]) -> Dict[str, str]:

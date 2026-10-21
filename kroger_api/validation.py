@@ -13,6 +13,7 @@ The constants are public so that other packages, such as kroger-mcp, can
 publish the same limits in their own schemas.
 """
 
+import math
 import re
 from typing import Any, Dict, List
 
@@ -150,24 +151,33 @@ def modality(value: Any, param: str = "modality") -> str:
     return value
 
 
+DECIMAL_PATTERN = r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)"
+
+
 def coordinate(value: Any, param: str, limit: float) -> str:
-    """A latitude (limit 90) or longitude (limit 180) as the decimal string the API expects."""
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        raise InvalidParameterError(param, value, "must be a decimal number") from None
-    if isinstance(value, bool) or not -limit <= number <= limit:
+    """A latitude (limit 90) or longitude (limit 180) as the decimal string the API expects.
+
+    Surrounding whitespace is removed from a string.
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        if not re.fullmatch(DECIMAL_PATTERN, text):
+            raise InvalidParameterError(param, value, "must be a decimal number")
+    elif isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+        text = str(value)
+    else:
+        raise InvalidParameterError(param, value, "must be a decimal number")
+    if not -limit <= float(text) <= limit:
         raise InvalidParameterError(param, value, f"must be a decimal number from -{limit:g} to {limit:g}")
-    return str(value)
+    return text
 
 
 def lat_long(value: Any, param: str = "lat_long") -> str:
+    """'latitude,longitude', returned without whitespace around either number"""
     parts = value.split(",") if isinstance(value, str) else []
     if len(parts) != 2:
         raise InvalidParameterError(param, value, "must be 'latitude,longitude', for example '39.306346,-84.278902'")
-    coordinate(parts[0].strip(), param, 90)
-    coordinate(parts[1].strip(), param, 180)
-    return value
+    return f"{coordinate(parts[0], param, 90)},{coordinate(parts[1], param, 180)}"
 
 
 def cart_items(items: Any, param: str = "items") -> List[Dict[str, Any]]:

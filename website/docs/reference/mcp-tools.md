@@ -90,7 +90,7 @@ Each tool's input schema declares the values the Kroger API accepts, so an MCP c
 | `search_term`, `searches[].term` | `search_products`, `bulk_search_products`           | At least three characters and at most eight words, separated by single spaces                        |
 | `limit`                          | `search_products`, `bulk_search_products`           | 1 to 50, default 10                                                                                  |
 | `fulfillment`                    | `search_products`, `bulk_search_products`           | `ais` (in store), `csp` (curbside pickup), `dth` (delivery to home), or `sth` (ship to home)         |
-| `brand`                          | `search_products`, `bulk_search_products`           | A brand name, case-sensitive, such as `Kroger`                                                       |
+| `brand`                          | `search_products`, `bulk_search_products`           | A brand name, case-sensitive, such as `Kroger`. Not only spaces.                                     |
 | `searches`                       | `bulk_search_products`                              | 1 to 25 searches. Each takes `term`, `limit`, `fulfillment`, and `brand`, and no other keys.         |
 | `zip_code`                       | `search_locations`                                  | Five digits. ZIP+4 is not accepted. Defaults to `KROGER_USER_ZIP_CODE`, or `10001` if it is not set. |
 | `radius_in_miles`                | `search_locations`                                  | 1 to 100, default 10                                                                                 |
@@ -178,5 +178,5 @@ These cases are not errors:
 - A search that finds nothing returns `count: 0` and a `message`.
 - `get_preferred_location` with no preferred location returns `preferred_location_id: null`.
 - A product search can return `api_warnings` from the Kroger API, such as `The following productIds were not found: 9999999999999`.
-- A search of a `bulk_search_products` call can fail while the others succeed. That search has `success: false` and an `error`. An error that would fail every later search too, such as a rate limit or a network failure, stops the remaining searches: they have `searched: false`, and the result has `stopped_early` with the reason and next step.
+- A search of a `bulk_search_products` call can fail while the others succeed. That search has `success: false` and an `error`. An error that would fail every later search too, such as a rate limit or a network failure, stops the remaining searches: they have `searched: false`, and the result has `stopped_early` with the reason and next step. An invalid term or brand fails the whole call before any search runs.
 - If the Kroger cart accepts items but the server cannot update its local cart tracking, for any reason, the result is a success with a `warning`, so the agent does not add the items a second time.

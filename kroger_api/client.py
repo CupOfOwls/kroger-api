@@ -1,12 +1,18 @@
 import base64
 import logging
 import os
+import ssl
 import time
-from typing import Dict, Optional, Any, Tuple, Union
+from typing import Dict, Iterator, Optional, Any, Tuple, Union
 from urllib.parse import urljoin
 
 import requests
 import urllib3
+
+try:
+    from urllib3.util.ssl_match_hostname import CertificateError as _HostnameMismatchError
+except ImportError:  # urllib3 before 1.26.5 keeps it in urllib3.packages
+    _HostnameMismatchError = ssl.CertificateError
 
 from kroger_api import validation
 from kroger_api.errors import (
@@ -31,6 +37,30 @@ DEFAULT_TIMEOUT = 30
 # Treat a token as expired this many seconds early, so it does not expire
 # between the check and the request.
 EXPIRY_MARGIN_SECONDS = 60
+
+# urllib3 2 raises ProxyError only before it has connected to the proxy
+# (connectionpool checks conn.has_connected_to_proxy). urllib3 1.26 also
+# raises it for a connection lost after the request went through the proxy.
+_PROXY_ERROR_MEANS_NOT_SENT = int(urllib3.__version__.split(".")[0]) >= 2
+
+# Failures that happen while the connection is being set up, so before any
+# part of the request is sent: DNS failures and refused connections
+# (NewConnectionError), and a certificate the client does not accept, which
+# fails the TLS handshake.
+_SETUP_FAILURES = (urllib3.exceptions.NewConnectionError, ssl.SSLCertVerificationError, _HostnameMismatchError)
+
+
+def _causes(error: BaseException) -> Iterator[BaseException]:
+    """error and the exceptions it wraps, through args, reason, and __cause__"""
+    pending, seen = [error], set()
+    while pending and len(seen) < 20:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        yield current
+        wrapped = [*current.args, getattr(current, "reason", None), current.__cause__]
+        pending.extend(e for e in wrapped if isinstance(e, BaseException))
 
 
 class KrogerClient:
@@ -161,13 +191,16 @@ class KrogerClient:
         self._client_credentials_access_token = token_info["access_token"]
         return token_info
     
-    def get_token_with_authorization_code(self, code: str, code_verifier: Optional[str] = None) -> Dict[str, Any]:
+    def get_token_with_authorization_code(self, code: str, code_verifier: Optional[str] = None,
+                                          token_file: Optional[str] = None) -> Dict[str, Any]:
         """
         Get an access token using an authorization code
         
         Args:
             code: The authorization code received from the redirect
             code_verifier: PKCE code verifier used during authorization (if PKCE was used)
+            token_file: The file to save the user token to (default USER_TOKEN_FILE).
+                Later refreshes save to the same file.
             
         Returns:
             The token information
@@ -184,8 +217,8 @@ class KrogerClient:
             )
         validation.check_non_empty("code", code)
 
-        # Set the token file for user tokens
-        self.token_file = USER_TOKEN_FILE
+        # A user token never goes to this client's client-credentials file
+        self.token_file = token_file or USER_TOKEN_FILE
         
         # Prepare parameters for token request
         params = {
@@ -379,16 +412,14 @@ class KrogerClient:
     def _request_sent(error: requests.exceptions.RequestException) -> Optional[bool]:
         """False if the request certainly never reached the server, else None (unknown)
 
-        DNS failures and refused connections fail before anything is sent;
-        requests reports them as a MaxRetryError whose reason is a
-        NewConnectionError. A TLS or proxy failure also ends the attempt
-        before the request goes out. A connection lost later may have
-        delivered the request.
+        DNS failures, refused connections, and rejected certificates fail
+        before anything is sent. Other TLS errors are not certain: urllib3
+        reports a TLS error while it reads the response the same way as one
+        in the handshake, after the request has been sent.
         """
-        if isinstance(error, (requests.exceptions.SSLError, requests.exceptions.ProxyError)):
+        if _PROXY_ERROR_MEANS_NOT_SENT and isinstance(error, requests.exceptions.ProxyError):
             return False
-        cause = error.args[0] if error.args else None
-        if isinstance(getattr(cause, "reason", None), urllib3.exceptions.NewConnectionError):
+        if any(isinstance(cause, _SETUP_FAILURES) for cause in _causes(error)):
             return False
         return None
 
@@ -416,11 +447,14 @@ class KrogerClient:
         'WWW-Authenticate: Bearer ... error="invalid_token"' header, and a
         body of only {"message": "Unauthorized"}.
 
-        A user token is refreshed. The refresh token in memory is tried
-        first, then the one in token_file if it differs: another process
-        that shares the file may have refreshed the token since this client
-        loaded it. A client-credentials token is replaced with a new one for
-        the same scope. Any other token is not replaced.
+        A user token is refreshed. The refresh token in token_file is tried
+        first, then the one in memory if it differs. The file holds the
+        newest refresh token: this client saves every refresh there, and
+        another process that shares the file may have refreshed since this
+        client loaded it. Sending a refresh token that was already used first
+        would risk Kroger revoking the newer one too, as RFC 9700 section
+        4.14.2 recommends. A client-credentials token is replaced with a new
+        one for the same scope. Any other token is not replaced.
 
         Returns:
             (True, None) if a new token is in place, or (False, reason) if
@@ -432,9 +466,8 @@ class KrogerClient:
                 message describes the real problem better than the 401 does.
         """
         token_info = self.token_info or {}
-        refresh_tokens = [token_info.get("refresh_token")]
-        if self.token_file:
-            refresh_tokens.append(get_refresh_token(self.token_file))
+        refresh_tokens = [get_refresh_token(self.token_file) if self.token_file else None,
+                          token_info.get("refresh_token")]
         refresh_tokens = list(dict.fromkeys(t for t in refresh_tokens if t))
 
         rejection = None
@@ -458,7 +491,7 @@ class KrogerClient:
         return False, "There is no refresh token, and the token is not a client-credentials token, so there is no way to get a new one."
     
     def _make_request(self, method: str, endpoint: str, params: Optional[Dict] = None, data: Optional[Dict] = None,
-                    headers: Optional[Dict] = None) -> Union[Dict[str, Any], None]:
+                    headers: Optional[Dict] = None, read_body: bool = True) -> Union[Dict[str, Any], None]:
         """
         Make a request to the Kroger API
         
@@ -468,6 +501,8 @@ class KrogerClient:
             params: Query parameters
             data: Request body data
             headers: Additional HTTP headers
+            read_body: False for a request whose response body is not used;
+                any 2xx response then returns None
             
         Returns:
             The JSON response or None if response has no content
@@ -502,5 +537,7 @@ class KrogerClient:
             
         if not response.ok:
             raise error_from_response(response, note=note)
+        if not read_body:
+            return None
                 
         return self._parse_json(response)

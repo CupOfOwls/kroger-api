@@ -40,4 +40,6 @@ class CartAPI:
             "items": validation.cart_items(items)
         }
         
-        return self.client._make_request('PUT', '/v1/cart/add', data=data)
+        # The 2xx status is the result: an unreadable body must not report a
+        # completed add as a failure, which a caller might resend
+        self.client._make_request('PUT', '/v1/cart/add', data=data, read_body=False)

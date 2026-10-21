@@ -12,7 +12,7 @@ Kroger access tokens expire after 30 minutes. If a script runs longer than this 
 
 Tokens obtained through `authenticate_user` are saved to a local token file with their refresh token, and with `expires_at`, the time they expire. The library loads the stored token on later runs and refreshes it if it has expired. The browser opens only if there is no stored token, or the token has expired and cannot be refreshed: Kroger rejects the refresh token, or the client cannot reach Kroger.
 
-During a run, a request that gets `401` because the token has expired or been revoked is retried once: the client refreshes a user token, or requests a new client-credentials token, and resends the request. If Kroger rejects the refresh token, the client also tries the one in the token file, which another process that shares the file may have saved. If that fails, the client raises `AuthenticationError`, and its `note` says why. See [401 recovery](../reference/errors.md#401-recovery).
+During a run, a request that gets `401` because the token has expired or been revoked is retried once: the client refreshes a user token, or requests a new client-credentials token, and resends the request. The client sends the refresh token from the token file first, because another process that shares the file may have saved a newer one, and then the one in memory if it differs. If that fails, the client raises `AuthenticationError`, and its `note` says why. See [401 recovery](../reference/errors.md#401-recovery).
 
 ## Refresh explicitly
 
@@ -29,7 +29,7 @@ if token_info is None:
     print("No usable token. Sign the user in again.")
 ```
 
-`refresh_token_if_needed` returns `None` when there is no stored token, or when Kroger rejects the refresh token. It raises other errors, such as `APIConnectionError` for a network failure, so you can tell them apart from a sign-in that must be repeated.
+`refresh_token_if_needed` returns `None` when there is no stored token, when the token has expired and has no refresh token, or when Kroger rejects the refresh token. It raises other errors, such as `APIConnectionError` for a network failure, so you can tell them apart from a sign-in that must be repeated.
 
 To check a token that is already on the client, call `test_current_token()`:
 

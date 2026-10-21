@@ -5,8 +5,10 @@ Every exception derives from KrogerAPIError, so a single
 ``except KrogerAPIError`` catches anything the library raises about a request.
 HTTP-status and network errors also derive from the matching ``requests``
 exception, so code written for earlier versions (``except
-requests.exceptions.HTTPError`` followed by ``e.response.status_code``) keeps
-working.
+requests.exceptions.HTTPError`` followed by ``e.response.status_code``) still
+catches every error response. It no longer catches invalid arguments: those
+raise InvalidParameterError, a ValueError, before any request is sent.
+Catch KrogerAPIError to handle both.
 
     KrogerAPIError
     ├── ConfigurationError        (also ValueError)  missing credentials or settings
