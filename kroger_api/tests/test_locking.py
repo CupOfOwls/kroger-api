@@ -133,6 +133,16 @@ def test_file_system_without_locks_goes_on_without_the_lock(path, monkeypatch, c
 
 
 @posix_only
+def test_a_symbolic_link_to_the_file_shares_its_lock(path, tmp_path):
+    open(path, "w").close()
+    link = str(tmp_path / "link.json")
+    os.symlink(path, link)
+    with file_lock(link, timeout=5) as held:
+        assert held
+        assert another_process_can_lock(path, timeout=0.2) is False
+
+
+@posix_only
 @pytest.mark.skipif(not hasattr(os, "fork"), reason="needs os.fork")
 def test_a_forked_child_that_leaves_the_block_keeps_the_parents_lock(path):
     """The child's copy of the lock file shares the parent's lock, so unlocking it would release both"""

@@ -32,6 +32,8 @@ class TokenServer:
 
     def __init__(self, delay=0.5):
         self.delay = delay
+        # When set to an Event, refreshes wait for it instead of the delay
+        self.release = None
         self.current = "r0"
         self.issued = 0
         self.requests = []
@@ -52,7 +54,10 @@ class TokenServer:
                 refresh_token = body["refresh_token"][0]
                 server.requests.append(refresh_token)
                 # Keep both requests in flight at once, if two are sent
-                time.sleep(server.delay)
+                if server.release is not None:
+                    server.release.wait(timeout=10)
+                else:
+                    time.sleep(server.delay)
                 with server.lock:
                     if refresh_token == server.current:
                         server.issued += 1
@@ -102,12 +107,18 @@ def isolated(tmp_path, monkeypatch):
     return tmp_path
 
 
-# Loads the expired saved token, renewing it, when the "go" file appears
+# Loads the expired saved token, renewing it, when the "go" file appears.
+# Prints "renewing" when it has read the expired token and starts to renew it.
 RENEWER = """
 import json, os, sys, time
 from kroger_api import KrogerAPI
 from kroger_api.client import KrogerClient
 KrogerClient.BASE_URL = sys.argv[1]
+renew = KrogerClient._renew_user_token
+def announce_and_renew(self, *args):
+    print("renewing", flush=True)
+    return renew(self, *args)
+KrogerClient._renew_user_token = announce_and_renew
 kroger = KrogerAPI(client_id="id", client_secret="secret")
 print("ready", flush=True)
 while not os.path.exists(sys.argv[2]):
@@ -125,9 +136,14 @@ def test_two_processes_renew_an_expired_token_once(token_server, isolated):
                          stdout=subprocess.PIPE, text=True, env={**os.environ})
         for _ in range(2)
     ]
+    token_server.release = threading.Event()
     for process in processes:
         assert process.stdout.readline().strip() == "ready"
     go.touch()
+    # Both processes read the expired token before any refresh finishes
+    for process in processes:
+        assert process.stdout.readline().strip() == "renewing"
+    token_server.release.set()
     results = [json.loads(process.communicate(timeout=30)[0]) for process in processes]
 
     # One refresh; the other process waited and used the renewed token
@@ -249,3 +265,93 @@ def test_refresh_rejected_because_another_process_renewed_without_the_lock(reque
     requests_mock.post(f"{KrogerClient.BASE_URL}/v1/connect/oauth2/token", json=token_response)
     kroger = KrogerAPI(client_id="id", client_secret="secret")
     assert kroger.authorization.load_saved_token()["access_token"] == "from-other"
+
+
+def test_renewal_that_waited_for_a_sign_out_does_not_save_the_token_again(requests_mock):
+    from kroger_api.errors import NotAuthenticatedError
+    from kroger_api.token_storage import clear_token, token_file_lock
+
+    save_token({"access_token": "a0", "refresh_token": "r0", "expires_at": time.time() - 60}, USER_TOKEN_FILE)
+    token_requests = requests_mock.post(f"{KrogerClient.BASE_URL}/v1/connect/oauth2/token",
+                                        json={"access_token": "a1", "refresh_token": "r1", "expires_in": 1800})
+    held = threading.Event()
+
+    def sign_out():
+        with token_file_lock(USER_TOKEN_FILE):
+            held.set()
+            time.sleep(0.3)
+            clear_token(USER_TOKEN_FILE)
+
+    thread = threading.Thread(target=sign_out)
+    thread.start()
+    assert held.wait(timeout=5)
+    # Reads the expired token, then waits for the lock while the sign-out holds it
+    kroger = KrogerAPI(client_id="id", client_secret="secret")
+    with pytest.raises(NotAuthenticatedError, match="signed out"):
+        kroger.authorization.load_saved_token()
+    thread.join()
+    assert token_requests.call_count == 0
+    assert load_token(USER_TOKEN_FILE) is None
+
+
+def test_second_thread_with_a_rejected_app_token_uses_the_one_the_first_thread_got(monkeypatch):
+    """Two threads send the same app token, which Kroger rejects; the second 401 arrives after the
+    first thread replaced the token. Without resending with the current token, the second thread
+    would try to renew the app token as a user token, which has no refresh token, and fail."""
+    issued, first_rejected, replaced = [], threading.Lock(), threading.Event()
+    hold_second = {"first": True}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            issued.append(f"app{len(issued) + 1}")
+            self.answer(200, {"access_token": issued[-1], "expires_in": 1800})
+
+        def do_GET(self):
+            if self.headers["Authorization"] == "Bearer app1":
+                with first_rejected:
+                    first, hold_second["first"] = hold_second["first"], False
+                if not first:
+                    replaced.wait(timeout=5)
+                self.answer(401, {"message": "Unauthorized"})
+            else:
+                self.answer(200, {"data": []})
+                replaced.set()
+
+        def answer(self, status, answer):
+            data = json.dumps(answer).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, format, *args):
+            pass
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    monkeypatch.setattr(KrogerClient, "BASE_URL", f"http://127.0.0.1:{httpd.server_address[1]}")
+    try:
+        kroger = KrogerAPI(client_id="id", client_secret="secret")
+        kroger.authorization.get_token_with_client_credentials("product.compact")
+        results, errors = [], []
+
+        def call():
+            try:
+                results.append(kroger.location.list_chains())
+            except Exception as e:  # reported below
+                errors.append(e)
+
+        threads = [threading.Thread(target=call) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+    assert errors == []
+    assert results == [{"data": []}] * 2
+    assert issued == ["app1", "app2"]

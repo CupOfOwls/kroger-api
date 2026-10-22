@@ -37,6 +37,8 @@ from kroger_api.auth import authenticate_user
 kroger = authenticate_user(scopes="cart.basic:write profile.compact")
 ```
 
+Request only scopes whose API products are registered for your app in the Kroger Developer Portal: `cart.basic:write` needs the Cart API and `profile.compact` the Identity API. Kroger refuses the whole sign-in with `invalid_scope` when the app is not registered for one of them.
+
 ## PKCE
 
 PKCE (Proof Key for Code Exchange) protects the authorization-code flow from interception with a one-time code verifier and challenge: a program that intercepts the authorization code from the redirect cannot exchange it without the verifier. Kroger authorization endpoints support this in API version 1.0.17. `authenticate_user` and the `kroger-mcp` sign-in tools use it. If you build the flow yourself, use it too:

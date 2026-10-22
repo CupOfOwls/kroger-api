@@ -68,7 +68,7 @@ def file_lock(path: str, timeout: Optional[float] = None) -> Generator[bool, Non
     """
     Hold the lock of a file while the block runs
 
-    The lock is a separate file, path + ".lock", which is never deleted. It
+    The lock is a separate file, the resolved path + ".lock", which is never deleted. It
     is held through an operating system lock (flock, or msvcrt.locking on
     Windows), which ends when the process does, so a process that crashes
     never leaves the file locked.
@@ -85,7 +85,8 @@ def file_lock(path: str, timeout: Optional[float] = None) -> Generator[bool, Non
     """
     timeout = LOCK_TIMEOUT_SECONDS if timeout is None else timeout
     deadline = time.monotonic() + timeout
-    lock_path = os.path.abspath(path) + ".lock"
+    # Two paths to one file, through a symbolic link, share one lock
+    lock_path = os.path.realpath(path) + ".lock"
     with _locks_guard:
         lock = _locks.setdefault(lock_path, _PathLock())
 

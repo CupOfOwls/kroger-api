@@ -96,7 +96,8 @@ class AuthorizationAPI:
 
         Raises:
             NotAuthenticatedError: If there is no saved token, or it has
-                expired and has no refresh token
+                expired and has no refresh token, or it was deleted while
+                this call waited to renew it
             BadRequestError: If Kroger rejected the refresh token, so the
                 user has to sign in again
             KrogerAPIError: If renewing fails for another reason, such as a
@@ -118,12 +119,8 @@ class AuthorizationAPI:
                 f"The saved token in {get_token_file_path(token_file)} has expired and has no refresh token."
             )
 
+        # token_info has a refresh token, so this renews it or raises
         renewed = self.client._renew_user_token(token_file, token_info)
-        if renewed is None:
-            # Another process replaced the file with a token that has no refresh token
-            raise NotAuthenticatedError(
-                f"The saved token in {get_token_file_path(token_file)} has expired and has no refresh token."
-            )
         self.client.token_file = token_file
         return renewed
 

@@ -105,7 +105,7 @@ This library implements robust, automatic token management:
 
 **Proactive Approach:**
 1. Loads saved tokens and checks their expiry time (no API request)
-2. Automatically refreshes if token is expired and refresh token is available, while it holds a lock on the token file (`<token file>.lock`). A process that waited for the lock uses the token that another process renewed meanwhile, so a refresh token is never sent twice. A new sign-in and `clear_token` wait for the same lock.
+2. Automatically refreshes if token is expired and refresh token is available, while it holds a lock on the token file (`<token file>.lock`). A process that waited for the lock uses the token that another process renewed meanwhile, so a refresh token is never sent twice. A new sign-in and `clear_token` wait for the same lock, and a token whose file `clear_token` deleted is not renewed.
 
 **Reactive Approach:**
 1. Makes API requests with current token
@@ -247,6 +247,8 @@ When requesting user authorization, you can specify these scopes:
 - `product.compact` - Read product information
 - `cart.basic:write` - Add items to cart  
 - `profile.compact` - Read user profile information
+
+Request only the scopes of the API products your app is registered for (`cart.basic:write` needs the Cart API, `profile.compact` the Identity API). Kroger refuses the whole sign-in with `invalid_scope` when one is missing.
 
 ## 📖 API Documentation
 

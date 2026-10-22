@@ -63,7 +63,7 @@ So the client renews a saved token while it holds a lock on the token file:
 1. It reads the token file again. If another process renewed the token while this one waited, the client uses the saved token and sends no refresh request.
 1. Otherwise it refreshes the token, saves it, and releases the lock.
 
-`refresh_token_if_needed`, `load_saved_token`, `test_current_token`, and the `401` retry all work this way. A new sign-in and `clear_token` also wait for the lock, so a refresh that is in progress cannot overwrite them.
+`refresh_token_if_needed`, `load_saved_token`, `test_current_token`, and the `401` retry all work this way. A new sign-in and `clear_token` also wait for the lock, so a refresh that is in progress cannot overwrite them. After `clear_token` deletes the file, a process that still holds the old token in memory cannot renew it: the user has signed out and must sign in again.
 
 The lock ends when the process that holds it does, so a crashed process never leaves the file locked. If the lock is not free after 90 seconds, or the file system does not support locks, the client logs a warning and goes on without it. Use `kroger_api.token_storage.token_file_lock` to hold the lock in your own code, for example while you replace a token file by hand.
 

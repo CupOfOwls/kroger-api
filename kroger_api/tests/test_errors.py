@@ -235,6 +235,7 @@ def test_request_without_token_raises_not_authenticated(requests_mock):
 def test_401_refreshes_user_token_and_retries(kroger, requests_mock):
     kroger.client.token_info["refresh_token"] = "refresh-1"
     kroger.client.token_file = ".kroger_token_user.json"
+    save_token(kroger.client.token_info, ".kroger_token_user.json")
     requests_mock.get(f"{BASE}/v1/identity/profile",
                       [GATEWAY_401, {"status_code": 200, "json": {"data": {"id": "user-1"}}}])
     requests_mock.post(TOKEN_URL, json={"access_token": "new", "refresh_token": "refresh-2", "expires_in": 1800})
@@ -605,7 +606,7 @@ def test_401_uses_the_token_that_another_process_renewed(kroger, requests_mock):
 
 def test_401_uses_a_refresh_token_that_another_process_saved(kroger, requests_mock):
     """Another process refreshed first, so the refresh token in memory was rotated out"""
-    kroger.client.token_info["refresh_token"] = "refresh-1"
+    kroger.client.token_info.update(refresh_token="refresh-1", expires_at=time.time() - 100)
     kroger.client.token_file = ".kroger_token_user.json"
     # The other process's access token has expired since, so it cannot be used
     save_token({"access_token": "other", "refresh_token": "refresh-2", "expires_in": 1800,
@@ -628,8 +629,8 @@ def test_401_uses_a_refresh_token_that_another_process_saved(kroger, requests_mo
     assert token_requests == ["grant_type=refresh_token&refresh_token=refresh-2"]
 
 
-def test_401_falls_back_to_the_refresh_token_in_memory(kroger, requests_mock):
-    """The file holds an older token, for example because a save failed"""
+def test_401_sends_the_newer_refresh_token_in_memory_first(kroger, requests_mock):
+    """The file holds an older token, for example because a save failed, whose refresh token was used"""
     kroger.client.token_info["refresh_token"] = "refresh-2"
     kroger.client.token_file = ".kroger_token_user.json"
     # Unexpired, but issued before the token in memory, so it is not used
@@ -647,7 +648,18 @@ def test_401_falls_back_to_the_refresh_token_in_memory(kroger, requests_mock):
     requests_mock.post(TOKEN_URL, json=token_response)
     assert kroger.identity.get_profile() == {"data": {"id": "user-1"}}
     token_requests = [r.text for r in requests_mock.request_history if r.url == TOKEN_URL]
-    assert token_requests == [
-        "grant_type=refresh_token&refresh_token=refresh-1",
-        "grant_type=refresh_token&refresh_token=refresh-2",
-    ]
+    assert token_requests == ["grant_type=refresh_token&refresh_token=refresh-2"]
+
+
+def test_401_after_sign_out_does_not_save_the_token_again(kroger, requests_mock):
+    """clear_token deleted the file, so the token in memory is not renewed"""
+    kroger.client.token_info["refresh_token"] = "refresh-1"
+    kroger.client.token_file = ".kroger_token_user.json"
+    requests_mock.get(f"{BASE}/v1/identity/profile", [GATEWAY_401])
+    token_requests = requests_mock.post(TOKEN_URL, json={"access_token": "new", "refresh_token": "refresh-2",
+                                                         "expires_in": 1800})
+    with pytest.raises(AuthenticationError) as excinfo:
+        kroger.identity.get_profile()
+    assert "signed out" in str(excinfo.value)
+    assert token_requests.call_count == 0
+    assert load_token(".kroger_token_user.json") is None

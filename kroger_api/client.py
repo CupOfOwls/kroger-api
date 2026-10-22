@@ -26,7 +26,7 @@ from kroger_api.errors import (
     error_from_response,
 )
 
-from kroger_api.token_storage import USER_TOKEN_FILE, load_token, save_token, token_file_lock
+from kroger_api.token_storage import USER_TOKEN_FILE, get_token_file_path, load_token, save_token, token_file_lock
 from kroger_api.utils.env import load_env_file
 
 logger = logging.getLogger(__name__)
@@ -284,13 +284,19 @@ class KrogerClient:
         Threads and processes that share token_file renew its token one at a
         time. One that waited for the lock may find that another has renewed
         the token meanwhile (see _renewed_since); it then uses the saved
-        token. Otherwise the refresh token in the file is tried first, then
-        the replaced token's if it differs. The file holds the newest refresh
-        token. Sending one that was already used first would risk Kroger
-        revoking the newer one too, as RFC 9700 section 4.14.2 recommends.
-        If Kroger rejects them all, the file is read once more, in case a
-        process that does not take the lock (an older version, or one that
-        gave up waiting for it) saved a renewed token meanwhile.
+        token. Otherwise the refresh tokens of the saved and the replaced
+        token are tried, the newer token's first: the file's, unless saving
+        the replaced token failed. Sending a refresh token that was already
+        used first would risk Kroger revoking the newer one too, as RFC 9700
+        section 4.14.2 recommends. If Kroger rejects them all, the file is
+        read once more, in case a process that does not take the lock (an
+        older version, or one that gave up waiting for it) saved a renewed
+        token meanwhile.
+
+        A token file that no longer exists was deleted on purpose (a sign-out
+        through clear_token, which holds the lock): a failed save leaves the
+        old file, because save_token replaces it with a rename. So the
+        replaced token is then not renewed, and the file is not created again.
 
         Args:
             token_file: The file the token is read from and saved to
@@ -301,10 +307,14 @@ class KrogerClient:
             is no refresh token to try
 
         Raises:
+            NotAuthenticatedError: If the token file was deleted (the user signed out)
             BadRequestError: If Kroger rejected every refresh token (the last rejection)
             KrogerAPIError: If the token request fails for another reason
         """
         with token_file_lock(token_file):
+            path = get_token_file_path(token_file)
+            if not os.path.exists(path):
+                raise NotAuthenticatedError(f"The saved token in {path} was deleted: the user signed out.")
             saved = load_token(token_file)
             saved = saved if isinstance(saved, dict) else {}
             if self._renewed_since(saved, replaced):
@@ -312,8 +322,9 @@ class KrogerClient:
                 self.token_info = saved
                 return saved
 
+            newest_first = (replaced, saved) if self._expires_later(replaced, saved) else (saved, replaced)
             rejection = None
-            for candidate in dict.fromkeys(t for t in (saved.get("refresh_token"), replaced.get("refresh_token")) if t):
+            for candidate in dict.fromkeys(t["refresh_token"] for t in newest_first if t.get("refresh_token")):
                 logger.info("Refreshing the access token")
                 try:
                     return self._refresh(candidate, token_file)
@@ -342,8 +353,13 @@ class KrogerClient:
             return False
         if saved["access_token"] == replaced.get("access_token") or cls.is_token_expired(saved):
             return False
+        return cls._expires_later(saved, replaced)
+
+    @staticmethod
+    def _expires_later(token: Dict[str, Any], other: Dict[str, Any]) -> bool:
+        """True if token expires after other, so it was issued later; False if either expiry is unknown"""
         try:
-            return float(saved["expires_at"]) > float(replaced["expires_at"])
+            return float(token["expires_at"]) > float(other["expires_at"])
         except (KeyError, TypeError, ValueError):
             return False
     
@@ -571,7 +587,7 @@ class KrogerClient:
                 renewed = self._renew_user_token(self.token_file, rejected)
             else:
                 renewed = self.refresh_token(refresh_token) if refresh_token else None
-        except BadRequestError as rejection:
+        except (BadRequestError, NotAuthenticatedError) as rejection:
             return False, f"Getting a new token failed: {rejection.message.splitlines()[0]}"
         if renewed is None:
             return False, "There is no refresh token, and the token is not a client-credentials token, so there is no way to get a new one."
