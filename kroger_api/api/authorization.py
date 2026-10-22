@@ -133,10 +133,10 @@ class AuthorizationAPI:
 
         Like load_saved_token, but returns None where that raises
         NotAuthenticatedError or BadRequestError.
-        
+
         Args:
             token_file: The file path to load the token from
-        
+
         Returns:
             The token information (either existing or refreshed), or None if
             there is no saved token, or it has expired and cannot be refreshed
