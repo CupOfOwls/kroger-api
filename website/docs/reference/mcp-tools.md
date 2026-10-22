@@ -63,7 +63,7 @@ The Kroger Public API does not offer cart _viewing_, so the server keeps a local
 | `get_authentication_info` | Get detailed authentication status                                                      | No            |
 | `force_reauthenticate`    | Delete the saved sign-in, so the user can sign in again                                 | No            |
 
-`test_authentication` and `get_authentication_info` report a user who is not signed in as a normal result, not an error. `test_authentication` compares the token's expiry time with the clock and sends no request, so a sign-in that Kroger revoked early still reports `token_valid: true` until a cart call fails. `get_user_profile` needs a sign-in that grants the `profile.compact` scope, and `start_authentication` requests only `product.compact` and `cart.basic:write`.
+`test_authentication` and `get_authentication_info` report a user who is not signed in as a normal result, not an error. `test_authentication` compares the token's expiry time with the clock and sends no request, so a sign-in that Kroger revoked early still reports `token_valid: true` until a cart call fails. `get_user_profile` needs a sign-in that grants the `profile.compact` scope. `start_authentication` requests it, together with `product.compact` and `cart.basic:write`. Sign-ins made with `kroger-mcp` before version 0.4.0 lack it, so `get_user_profile` returns a `permission_denied` error until the user signs in again; the cart tools keep working.
 
 ## Authentication tools
 

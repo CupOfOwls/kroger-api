@@ -4,7 +4,7 @@ import os
 import ssl
 import time
 from typing import Dict, Iterator, Optional, Any, Tuple, Union
-from urllib.parse import urljoin
+from urllib.parse import quote, urlencode, urljoin
 
 import requests
 import urllib3
@@ -26,7 +26,7 @@ from kroger_api.errors import (
     error_from_response,
 )
 
-from kroger_api.token_storage import USER_TOKEN_FILE, get_refresh_token, load_token, save_token
+from kroger_api.token_storage import USER_TOKEN_FILE, load_token, save_token, token_file_lock
 from kroger_api.utils.env import load_env_file
 
 logger = logging.getLogger(__name__)
@@ -147,13 +147,10 @@ class KrogerClient:
             params['code_challenge'] = code_challenge
             params['code_challenge_method'] = code_challenge_method or 'S256'
         
-        auth_path = "/v1/connect/oauth2/authorize"
-        url = urljoin(self.BASE_URL, auth_path)
-        
-        # Build URL manually
-        url += "?" + "&".join([f"{k}={v}" for k, v in params.items()])
-        
-        return url
+        url = urljoin(self.BASE_URL, "/v1/connect/oauth2/authorize")
+        # Percent-encode every value: the scope has spaces, and the redirect
+        # URI and state can hold characters such as & and =
+        return url + "?" + urlencode(params, quote_via=quote)
     
     def get_token_with_client_credentials(self, scope: str) -> Dict[str, Any]:
         """
@@ -231,14 +228,22 @@ class KrogerClient:
         
         token_info = self._get_token(**params)
         
-        # Save the token for future use
-        save_token(token_info, self.token_file)
+        # Save it with the file locked, so a refresh of the previous sign-in
+        # that is in progress cannot overwrite it afterwards
+        with token_file_lock(self.token_file):
+            save_token(token_info, self.token_file)
         
         return token_info
     
     def refresh_token(self, refresh_token: str) -> Dict[str, Any]:
         """
         Refresh an access token using a refresh token
+
+        The new token is saved to the client's token file (USER_TOKEN_FILE
+        if it has none), and the file's lock is held while the token is
+        refreshed and saved. This method always sends the given refresh
+        token; AuthorizationAPI.refresh_token_if_needed instead first checks
+        whether another process has refreshed the saved token already.
         
         Args:
             refresh_token: The refresh token received from a previous token request
@@ -249,6 +254,12 @@ class KrogerClient:
         Raises:
             BadRequestError: If the refresh token is invalid or expired
         """
+        token_file = self.token_file or USER_TOKEN_FILE
+        with token_file_lock(token_file):
+            return self._refresh(refresh_token, token_file)
+
+    def _refresh(self, refresh_token: str, token_file: str) -> Dict[str, Any]:
+        """Refresh the token and save it to token_file; the caller holds the file's lock"""
         try:
             token_info = self._get_token(
                 grant_type="refresh_token",
@@ -263,10 +274,78 @@ class KrogerClient:
         if "refresh_token" not in token_info:
             token_info["refresh_token"] = refresh_token
             
-        # Save the refreshed token
-        save_token(token_info, self.token_file or USER_TOKEN_FILE)
-
+        save_token(token_info, token_file)
         return token_info
+
+    def _renew_user_token(self, token_file: str, replaced: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Replace a user token that has expired or was rejected, with the token file locked
+
+        Threads and processes that share token_file renew its token one at a
+        time. One that waited for the lock may find that another has renewed
+        the token meanwhile (see _renewed_since); it then uses the saved
+        token. Otherwise the refresh token in the file is tried first, then
+        the replaced token's if it differs. The file holds the newest refresh
+        token. Sending one that was already used first would risk Kroger
+        revoking the newer one too, as RFC 9700 section 4.14.2 recommends.
+        If Kroger rejects them all, the file is read once more, in case a
+        process that does not take the lock (an older version, or one that
+        gave up waiting for it) saved a renewed token meanwhile.
+
+        Args:
+            token_file: The file the token is read from and saved to
+            replaced: The token information that expired or was rejected
+
+        Returns:
+            The new token information, now in token_info, or None if there
+            is no refresh token to try
+
+        Raises:
+            BadRequestError: If Kroger rejected every refresh token (the last rejection)
+            KrogerAPIError: If the token request fails for another reason
+        """
+        with token_file_lock(token_file):
+            saved = load_token(token_file)
+            saved = saved if isinstance(saved, dict) else {}
+            if self._renewed_since(saved, replaced):
+                logger.info("The saved token was renewed by another thread or process; using it")
+                self.token_info = saved
+                return saved
+
+            rejection = None
+            for candidate in dict.fromkeys(t for t in (saved.get("refresh_token"), replaced.get("refresh_token")) if t):
+                logger.info("Refreshing the access token")
+                try:
+                    return self._refresh(candidate, token_file)
+                except BadRequestError as e:
+                    rejection = e
+            if rejection is not None:
+                latest = load_token(token_file)
+                if isinstance(latest, dict) and self._renewed_since(latest, replaced):
+                    logger.info("The saved token was renewed by another process; using it")
+                    self.token_info = latest
+                    return latest
+                raise rejection
+            return None
+
+    @classmethod
+    def _renewed_since(cls, saved: Dict[str, Any], replaced: Dict[str, Any]) -> bool:
+        """True if saved is a user token, unexpired, and issued after replaced
+
+        A user token has a refresh token. All Kroger tokens last equally
+        long, so the one that expires later was issued later. A saved token
+        that is older than the replaced one, for example because saving the
+        replaced one failed, is not used. Neither is one whose age cannot be
+        compared.
+        """
+        if not saved.get("access_token") or not saved.get("refresh_token"):
+            return False
+        if saved["access_token"] == replaced.get("access_token") or cls.is_token_expired(saved):
+            return False
+        try:
+            return float(saved["expires_at"]) > float(replaced["expires_at"])
+        except (KeyError, TypeError, ValueError):
+            return False
     
     def test_token(self, token_info: Dict[str, Any]) -> bool:
         """
@@ -298,7 +377,9 @@ class KrogerClient:
                 
         try:
             logger.info("Access token has expired, refreshing it")
-            self.token_info = self.refresh_token(refresh_token)
+            if self.token_file:
+                return self._renew_user_token(self.token_file, token_info) is not None
+            self.refresh_token(refresh_token)
             return True
         except KrogerAPIError as e:
             logger.warning("Failed to refresh token: %s", e)
@@ -367,9 +448,12 @@ class KrogerClient:
             'Authorization': f'Basic {encoded_credentials}'
         }
     
-    def _get_auth_header(self) -> Dict[str, str]:
+    def _get_auth_header(self, token_info: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
         """
         Get the authorization header using the current token
+
+        Args:
+            token_info: The token to use (default token_info)
         
         Returns:
             The authorization header with the access token
@@ -377,14 +461,15 @@ class KrogerClient:
         Raises:
             NotAuthenticatedError: If there is no token information available
         """
-        if not self.token_info or 'access_token' not in self.token_info:
+        token_info = token_info if token_info is not None else self.token_info
+        if not token_info or 'access_token' not in token_info:
             raise NotAuthenticatedError(
                 "No access token available. Get one first with get_token_with_client_credentials(), "
                 "get_token_with_authorization_code(), or kroger_api.auth.authenticate_user()."
             )
         
         return {
-            'Authorization': f"Bearer {self.token_info['access_token']}",
+            'Authorization': f"Bearer {token_info['access_token']}",
             'Accept': 'application/json'
         }
 
@@ -436,7 +521,7 @@ class KrogerClient:
         except ValueError:
             raise InvalidResponseError(response) from None
 
-    def _recover_from_unauthorized(self) -> Tuple[bool, Optional[str]]:
+    def _recover_from_unauthorized(self, rejected: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
         """
         Replace a rejected access token, once
 
@@ -444,14 +529,18 @@ class KrogerClient:
         'WWW-Authenticate: Bearer ... error="invalid_token"' header, and a
         body of only {"message": "Unauthorized"}.
 
-        A user token is refreshed. The refresh token in token_file is tried
-        first, then the one in memory if it differs. The file holds the
-        newest refresh token: this client saves every refresh there, and
-        another process that shares the file may have refreshed since this
-        client loaded it. Sending a refresh token that was already used first
-        would risk Kroger revoking the newer one too, as RFC 9700 section
-        4.14.2 recommends. A client-credentials token is replaced with a new
-        one for the same scope. Any other token is not replaced.
+        If another thread has replaced token_info since the request was
+        sent, the request is retried with that token. A client-credentials
+        token is replaced with a new one for the same
+        scope. A user token is renewed with token_file locked (see
+        _renew_user_token): if another thread or process has renewed it
+        already, the saved token is used; otherwise the refresh token in
+        token_file is tried first, then the one in memory if it differs.
+        Without a token_file, the refresh token in memory is used. Any other
+        token is not replaced.
+
+        Args:
+            rejected: The token information the request was sent with
 
         Returns:
             (True, None) if a new token is in place, or (False, reason) if
@@ -462,30 +551,31 @@ class KrogerClient:
                 such as a network error or rejected client credentials. Its
                 message describes the real problem better than the 401 does.
         """
-        token_info = self.token_info or {}
-        refresh_tokens = [get_refresh_token(self.token_file) if self.token_file else None,
-                          token_info.get("refresh_token")]
-        refresh_tokens = list(dict.fromkeys(t for t in refresh_tokens if t))
+        current = self.token_info or {}
+        rejected_access_token = rejected.get("access_token")
+        if current.get("access_token") and current["access_token"] != rejected_access_token:
+            return True, None
 
-        rejection = None
-        for refresh_token in refresh_tokens:
-            logger.info("Access token was rejected, refreshing it")
-            try:
-                self.refresh_token(refresh_token)
-                return True, None
-            except BadRequestError as e:
-                rejection = e
-        if rejection is not None:
-            return False, f"Getting a new token failed: {rejection.message.splitlines()[0]}"
-
-        if self._client_credentials_scope and token_info.get("access_token") == self._client_credentials_access_token:
+        if self._client_credentials_scope and rejected_access_token == self._client_credentials_access_token:
             logger.info("Client-credentials token was rejected, requesting a new one")
             new_token = self._get_token(grant_type="client_credentials", scope=self._client_credentials_scope)
             self._client_credentials_access_token = new_token["access_token"]
             if self.token_file:
                 save_token(new_token, self.token_file)
             return True, None
-        return False, "There is no refresh token, and the token is not a client-credentials token, so there is no way to get a new one."
+
+        refresh_token = rejected.get("refresh_token")
+        logger.info("Access token was rejected, getting a new one")
+        try:
+            if self.token_file:
+                renewed = self._renew_user_token(self.token_file, rejected)
+            else:
+                renewed = self.refresh_token(refresh_token) if refresh_token else None
+        except BadRequestError as rejection:
+            return False, f"Getting a new token failed: {rejection.message.splitlines()[0]}"
+        if renewed is None:
+            return False, "There is no refresh token, and the token is not a client-credentials token, so there is no way to get a new one."
+        return True, None
     
     def _make_request(self, method: str, endpoint: str, params: Optional[Dict] = None, data: Optional[Dict] = None,
                     headers: Optional[Dict] = None, read_body: bool = True) -> Union[Dict[str, Any], None]:
@@ -514,21 +604,24 @@ class KrogerClient:
         """
         url = urljoin(self.BASE_URL, endpoint)
         
-        def send() -> requests.Response:
+        def send() -> Tuple[Dict[str, Any], requests.Response]:
+            # Another thread can replace token_info at any time, so keep the
+            # token this request is sent with
+            token_info = self.token_info
             # Combine default authorization headers with any additional headers
-            request_headers = self._get_auth_header()
+            request_headers = self._get_auth_header(token_info)
             if headers:
                 request_headers.update(headers)
             # Use json parameter to automatically set Content-Type
-            return self._send(method, url, params=params, json=data, headers=request_headers)
+            return token_info, self._send(method, url, params=params, json=data, headers=request_headers)
         
-        response = send()
+        sent_token, response = send()
             
         note = None
         if response.status_code == 401:
-            recovered, note = self._recover_from_unauthorized()
+            recovered, note = self._recover_from_unauthorized(sent_token or {})
             if recovered:
-                response = send()
+                _, response = send()
                 if response.status_code == 401:
                     note = "The request was retried once with a new token and was rejected again."
             

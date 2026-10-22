@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import patch, MagicMock
+from urllib.parse import parse_qs, urlsplit
 from kroger_api.client import KrogerClient
 
 class TestKrogerClient(unittest.TestCase):
@@ -9,9 +10,25 @@ class TestKrogerClient(unittest.TestCase):
 
     def test_get_authorization_url_basic(self):
         url = self.client.get_authorization_url(scope="openid profile")
-        self.assertIn("scope=openid profile", url)
+        self.assertIn("scope=openid%20profile", url)
         self.assertIn("client_id=fake_id", url)
-        self.assertIn("redirect_uri=http://redirect.uri", url)
+        self.assertIn("redirect_uri=http%3A%2F%2Fredirect.uri", url)
+
+    def test_get_authorization_url_encodes_every_value(self):
+        client = KrogerClient(client_id="fake_id", client_secret="fake_secret",
+                              redirect_uri="http://localhost:8000/callback?app=a&b=c")
+        url = client.get_authorization_url(scope="cart.basic:write profile.compact", state="a&b=c d",
+                                           code_challenge="abc-_", code_challenge_method="S256")
+        self.assertTrue(url.startswith("https://api.kroger.com/v1/connect/oauth2/authorize?"))
+        self.assertEqual(parse_qs(urlsplit(url).query), {
+            "scope": ["cart.basic:write profile.compact"],
+            "client_id": ["fake_id"],
+            "redirect_uri": ["http://localhost:8000/callback?app=a&b=c"],
+            "response_type": ["code"],
+            "state": ["a&b=c d"],
+            "code_challenge": ["abc-_"],
+            "code_challenge_method": ["S256"],
+        })
 
     @patch('kroger_api.client.load_token')
     @patch('kroger_api.client.save_token')

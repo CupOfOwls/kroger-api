@@ -587,11 +587,29 @@ def test_rejected_app_credentials_while_refreshing_are_raised_as_themselves(krog
     assert "KROGER_CLIENT_ID" in excinfo.value.hint
 
 
+def test_401_uses_the_token_that_another_process_renewed(kroger, requests_mock):
+    """Another process renewed the token after this client loaded it, so no refresh is needed"""
+    kroger.client.token_info["refresh_token"] = "refresh-1"
+    kroger.client.token_file = ".kroger_token_user.json"
+    save_token({"access_token": "other", "refresh_token": "refresh-2", "expires_in": 1800,
+                "expires_at": kroger.client.token_info["expires_at"] + 100}, ".kroger_token_user.json")
+    requests_mock.get(f"{BASE}/v1/identity/profile",
+                      [GATEWAY_401, {"status_code": 200, "json": {"data": {"id": "user-1"}}}])
+    token_requests = requests_mock.post(TOKEN_URL, status_code=500)
+
+    assert kroger.identity.get_profile() == {"data": {"id": "user-1"}}
+    assert requests_mock.request_history[-1].headers["Authorization"] == "Bearer other"
+    assert kroger.client.token_info["access_token"] == "other"
+    assert token_requests.call_count == 0
+
+
 def test_401_uses_a_refresh_token_that_another_process_saved(kroger, requests_mock):
     """Another process refreshed first, so the refresh token in memory was rotated out"""
     kroger.client.token_info["refresh_token"] = "refresh-1"
     kroger.client.token_file = ".kroger_token_user.json"
-    save_token({"access_token": "other", "refresh_token": "refresh-2", "expires_in": 1800}, ".kroger_token_user.json")
+    # The other process's access token has expired since, so it cannot be used
+    save_token({"access_token": "other", "refresh_token": "refresh-2", "expires_in": 1800,
+                "expires_at": time.time() - 10}, ".kroger_token_user.json")
     requests_mock.get(f"{BASE}/v1/identity/profile",
                       [GATEWAY_401, {"status_code": 200, "json": {"data": {"id": "user-1"}}}])
 
@@ -611,10 +629,12 @@ def test_401_uses_a_refresh_token_that_another_process_saved(kroger, requests_mo
 
 
 def test_401_falls_back_to_the_refresh_token_in_memory(kroger, requests_mock):
-    """The file holds an older refresh token, for example because a save failed"""
+    """The file holds an older token, for example because a save failed"""
     kroger.client.token_info["refresh_token"] = "refresh-2"
     kroger.client.token_file = ".kroger_token_user.json"
-    save_token({"access_token": "old", "refresh_token": "refresh-1", "expires_in": 1800}, ".kroger_token_user.json")
+    # Unexpired, but issued before the token in memory, so it is not used
+    save_token({"access_token": "old", "refresh_token": "refresh-1", "expires_in": 1800,
+                "expires_at": kroger.client.token_info["expires_at"] - 100}, ".kroger_token_user.json")
     requests_mock.get(f"{BASE}/v1/identity/profile",
                       [GATEWAY_401, {"status_code": 200, "json": {"data": {"id": "user-1"}}}])
 

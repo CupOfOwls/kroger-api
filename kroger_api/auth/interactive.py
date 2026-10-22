@@ -12,6 +12,7 @@ from ..utils.oauth import (
     open_browser_for_auth
 )
 from ..utils.env import get_redirect_uri
+from ..utils.pkce import generate_pkce_parameters
 from ..errors import KrogerAPIError
 from ..kroger_api import KrogerAPI
 from ..token_storage import USER_TOKEN_FILE
@@ -27,6 +28,9 @@ def authenticate_user(scopes: str = "cart.basic:write profile.compact",
     is used while it is unexpired, and an expired one is refreshed. The
     browser opens only if there is no saved token, or it has expired and
     Kroger rejects (or the client cannot reach Kroger to use) its refresh token.
+    The authorization uses PKCE (RFC 7636): the code can be exchanged only
+    with a verifier that never leaves this process, so a code that another
+    program on the machine intercepts from the redirect cannot be used.
     
     Args:
         scopes: The OAuth scopes to request
@@ -74,11 +78,14 @@ def authenticate_user(scopes: str = "cart.basic:write profile.compact",
     try:
         # Generate a random state value for security
         state = generate_random_state()
+        pkce = generate_pkce_parameters()
         
         # Get the authorization URL with the required scopes
         auth_url = kroger.authorization.get_authorization_url(
             scope=scopes,
-            state=state
+            state=state,
+            code_challenge=pkce["code_challenge"],
+            code_challenge_method=pkce["code_challenge_method"],
         )
         
         # Open the authorization URL in the default browser
@@ -95,7 +102,9 @@ def authenticate_user(scopes: str = "cart.basic:write profile.compact",
         
         # Exchange the authorization code for an access token, saved to token_file
         print("Authorization code received, exchanging for access token...")
-        kroger.authorization.get_token_with_authorization_code(auth_code, token_file=token_file)
+        kroger.authorization.get_token_with_authorization_code(
+            auth_code, code_verifier=pkce["code_verifier"], token_file=token_file
+        )
         
         print("Authentication successful.")
         return kroger

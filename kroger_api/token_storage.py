@@ -7,8 +7,11 @@ import json
 import logging
 import os
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Iterator, Optional
+
+from kroger_api.utils.locking import file_lock
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +47,25 @@ def get_token_file_path(token_name) -> str:
     return str(token_dir / token_name)
 
 
+@contextmanager
+def token_file_lock(token_file: str = USER_TOKEN_FILE, timeout: Optional[float] = None) -> Iterator[bool]:
+    """
+    Hold the lock of a token file while the block runs
+
+    kroger-api holds it while it refreshes a saved token: it reads the file,
+    refreshes, and saves the new token as one step, so two threads or
+    processes that share the file never refresh the same token at once. The
+    lock is reentrant within a thread. See kroger_api.utils.locking.file_lock.
+
+    Args:
+        token_file: The token file, resolved like the other functions here
+        timeout: Seconds to wait for the lock (default LOCK_TIMEOUT_SECONDS)
+
+    Yields:
+        True if the lock is held, False if the block runs without it
+    """
+    with file_lock(get_token_file_path(token_file), timeout) as held:
+        yield held
 
 
 def save_token(token_info: Dict[str, Any], token_file: str = TOKEN_FILE) -> None:
@@ -111,15 +133,18 @@ def load_token(token_file: str = TOKEN_FILE) -> Optional[Dict[str, Any]]:
 def clear_token(token_file: str = TOKEN_FILE) -> None:
     """
     Delete the token file if it exists.
+
+    The file's lock is held, so a refresh in progress cannot save the token
+    again after it is deleted.
     
     Args:
         token_file: The file path to delete
     """
-    token_file = get_token_file_path(token_file)
-
-    if os.path.exists(token_file):
-        os.remove(token_file)
-        logger.info("Deleted the token file %s", token_file)
+    with token_file_lock(token_file):
+        token_file = get_token_file_path(token_file)
+        if os.path.exists(token_file):
+            os.remove(token_file)
+            logger.info("Deleted the token file %s", token_file)
 
 
 def get_refresh_token(token_file: str = TOKEN_FILE) -> Optional[str]:

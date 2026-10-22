@@ -31,6 +31,7 @@ The client writes every token it obtains to a file, named per flow (and per scop
 - The browser round-trip occurs once per grant. It does not repeat every time you run the script.
 - You can refresh tokens because the refresh token survives the process that obtained it.
 - Multiple flows can coexist. User tokens and client-credentials tokens are stored in separate files so they do not overwrite each other.
+- Several processes can share one sign-in. A process renews a saved user token only while it holds a lock on the token file, and uses the token that another process renewed while it waited, so two processes never send the same refresh token. See [Share a sign-in between processes](../how-to/refresh-tokens.md#share-a-sign-in-between-processes).
 
 The token directory is sensitive state on disk. Token files are credentials; the [refresh guide](../how-to/refresh-tokens.md) closes on the same warning: do not commit them.
 
@@ -45,3 +46,5 @@ Some mistakes produce no error at all. The Kroger API ignores a `fulfillment` va
 ## MCP system
 
 Authentication, storage, and resource groups are separable. This allows [kroger-mcp](https://github.com/CupOfOwls/kroger-mcp) to wrap each client capability as an MCP tool. The MCP server handles the agent side (tool listing and tool calls) and passes Kroger requests to kroger-api. The [approval model](mcp-approval.md) applies to each call that crosses that boundary. When a call fails, the server turns the `kroger-api` exception into an MCP [error result](../reference/mcp-tools.md#error-results), with the same details and a next step that names the tool to use, so the agent can correct itself.
+
+`kroger-api` sends each request and waits for the answer, so the server runs every tool that calls Kroger or reads its state files in a worker thread. A slow Kroger request then holds up only its own call: the agent's other calls, cancellation, and the other clients of an HTTP-transport server go on. The threads share one client per kind of token and the local state files, so the server locks the cached clients and holds a file lock while it changes the cart tracking, the order history, or the preferred location.

@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Every exception can be pickled, so it can cross a process boundary.
 - `kroger_api.utils.env.load_env_file()` and `kroger_api.token_storage.USER_TOKEN_FILE`.
 - `get_token_with_authorization_code(..., token_file=...)` saves the new user token to that file instead of `.kroger_token_user.json`.
+- `AuthorizationAPI.load_saved_token(token_file=None)` loads a saved user token and renews it if it has expired, like `refresh_token_if_needed`, but says why it cannot: it raises `NotAuthenticatedError` when there is no saved token or no refresh token, and `BadRequestError`, with Kroger's message, when Kroger rejects the refresh token. `refresh_token_if_needed` returns `None` in those cases, as before.
+- `kroger_api.token_storage.token_file_lock(token_file)` and `kroger_api.utils.locking.file_lock(path)`: an exclusive lock on a file (`<file>.lock`, through `flock`, or `msvcrt.locking` on Windows) that the threads of a process and other processes respect. It is reentrant within a thread, ends with the process that holds it, and after 90 seconds, or on a file system without locks, lets the caller go on without it and logs a warning.
 
 ### Fixed
 
@@ -28,10 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `get_authorization_url` without a redirect URI raises `ConfigurationError`. It used to build a URL with `redirect_uri=None` in it.
 - `refresh_token_if_needed` puts an unexpired saved token on the client, so the next call uses it, and saves a refreshed token back to the file it came from. It returns `None` when the refresh token is rejected, and raises other errors, such as a network failure, instead of returning `None` for them too. It changes the client's token file only when it uses or refreshes the saved token, so a later save cannot put a client-credentials token in a user token file.
 - `authenticate_user(token_file=...)` saves a new sign-in to that file and leaves `.kroger_token_user.json` unchanged. It always saved to `.kroger_token_user.json`.
+- **Two processes or threads that renew the same saved token at once no longer sign each other out.** Kroger issues a new refresh token with each refresh, so the second of two simultaneous refreshes sent a refresh token that was already used, and Kroger rejected it (or, with reuse detection, revoked the sign-in). Renewing a saved user token now holds a lock on its token file: `refresh_token_if_needed`, `load_saved_token`, `test_current_token`, and the 401 retry. A process or thread that waited for the lock uses the token that the other one saved, if it was issued later, and sends no refresh request. If every refresh token is rejected, the file is read once more, in case a process that does not take the lock (an earlier version) renewed the token meanwhile. A thread whose request got a 401 after another thread replaced the client's token resends the request with that token.
+- A new sign-in (`get_token_with_authorization_code`) and `clear_token` wait for a refresh that is in progress, so the refresh cannot overwrite the new sign-in or save the deleted token again.
+- `get_authorization_url` percent-encodes every parameter. A redirect URI with a query string (`&`), or a `state` or `banner` with reserved characters, broke the authorization URL, and the spaces between scopes were not encoded.
 - `extract_port_from_redirect_uri` returns 80 or 443 for a redirect URI without a port, such as `http://localhost/callback`. It raised `ValueError`.
 
 ### Security
 
+- **`authenticate_user` uses PKCE** (RFC 7636). The code exchange needs a verifier that never leaves the process, so an authorization code that another program intercepts from the redirect to `localhost` cannot be used. It did not use PKCE, although the library supports it and kroger-mcp's sign-in used it.
 - `generate_random_state` uses the `secrets` module. It used `random`, whose output can be predicted, for the OAuth state that guards against cross-site request forgery.
 - `save_token` writes a temporary file that is private (mode 600) from the moment it is created, then replaces the token file with it. It used to write the token file with default permissions and restrict them afterward, and a failed or concurrent write could leave a half-written file.
 

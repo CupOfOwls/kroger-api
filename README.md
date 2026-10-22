@@ -99,12 +99,13 @@ This library implements robust, automatic token management:
 - **Expiry tracking** - Checks a token's expiry time before use, with no API call
 - **Reactive recovery** - Automatically refreshes expired tokens during API calls
 - **PKCE Support** - Enhanced OAuth security with Proof Key for Code Exchange
+- **Shared sign-ins** - Processes and threads that share a token file renew it one at a time, so they never sign each other out
 
 ### 🔧 How it Works
 
 **Proactive Approach:**
 1. Loads saved tokens and checks their expiry time (no API request)
-2. Automatically refreshes if token is expired and refresh token is available
+2. Automatically refreshes if token is expired and refresh token is available, while it holds a lock on the token file (`<token file>.lock`). A process that waited for the lock uses the token that another process renewed meanwhile, so a refresh token is never sent twice. A new sign-in and `clear_token` wait for the same lock.
 
 **Reactive Approach:**
 1. Makes API requests with current token
@@ -123,7 +124,7 @@ The directory is shared with the [kroger-mcp](https://github.com/CupOfOwls/kroge
 
 ### 🔒 Enhanced Security with PKCE
 
-This library supports PKCE (Proof Key for Code Exchange) for enhanced security in the OAuth flow:
+This library supports PKCE (Proof Key for Code Exchange) for enhanced security in the OAuth flow. `authenticate_user` uses it automatically; if you build the flow yourself, pass the parameters as shown:
 
 ```python
 from kroger_api import KrogerAPI

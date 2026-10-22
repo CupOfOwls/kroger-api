@@ -99,6 +99,46 @@ def test_sign_in_with_a_token_file_saves_only_to_that_file(monkeypatch, requests
     assert kroger.client.token_file == "alt.json"
 
 
+def test_sign_in_uses_pkce(monkeypatch, requests_mock):
+    import base64
+    import hashlib
+
+    import kroger_api.auth.interactive as interactive
+
+    monkeypatch.setenv("KROGER_CLIENT_ID", "id")
+    monkeypatch.setenv("KROGER_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("KROGER_REDIRECT_URI", "http://localhost:8765/callback")
+
+    class Server:
+        def shutdown(self):
+            pass
+
+    callbacks, urls = [], []
+    monkeypatch.setattr(interactive, "start_oauth_server", lambda port, cb: (callbacks.append(cb), (Server(), None))[1])
+
+    def approve(url):
+        urls.append(url)
+        callbacks[0]("CODE", parse_qs(urlparse(url).query)["state"][0])
+
+    monkeypatch.setattr(interactive, "open_browser_for_auth", approve)
+    token_request = requests_mock.post(TOKEN_URL, json={"access_token": "A", "refresh_token": "r1", "expires_in": 1800})
+
+    interactive.authenticate_user(timeout=5)
+
+    query = parse_qs(urlparse(urls[0]).query)
+    exchange = parse_qs(token_request.last_request.text)
+    verifier = exchange["code_verifier"][0]
+    # RFC 7636 section 4.1: 43 to 128 unreserved characters
+    assert 43 <= len(verifier) <= 128
+    assert all(c.isalnum() or c in "-._~" for c in verifier)
+    assert query["code_challenge_method"] == ["S256"]
+    expected = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    assert query["code_challenge"] == [expected]
+    assert query["scope"] == ["cart.basic:write profile.compact"]
+    assert exchange["code"] == ["CODE"]
+    assert "code_verifier" not in query
+
+
 def test_unusable_saved_token_does_not_change_the_clients_token_file():
     # An expired user token without a refresh token cannot be used, so the
     # client keeps saving its own tokens where it did before

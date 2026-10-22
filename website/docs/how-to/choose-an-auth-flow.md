@@ -29,7 +29,7 @@ kroger.authorization.get_token_with_client_credentials("product.compact")
 
 ## Authorization code
 
-The user signs in and grants scopes. `kroger-api` manages the process by opening the browser, running a local callback server on your `KROGER_REDIRECT_URI`, and storing the token.
+The user signs in and grants scopes. `kroger-api` manages the process by opening the browser, running a local callback server on your `KROGER_REDIRECT_URI`, and storing the token. It uses PKCE, described in the next section.
 
 ```python
 from kroger_api.auth import authenticate_user
@@ -39,7 +39,7 @@ kroger = authenticate_user(scopes="cart.basic:write profile.compact")
 
 ## PKCE
 
-PKCE (Proof Key for Code Exchange) protects the authorization-code flow from interception with a one-time code verifier and challenge. Kroger authorization endpoints support this in API version 1.0.17. Use it for any application running on devices you do not control.
+PKCE (Proof Key for Code Exchange) protects the authorization-code flow from interception with a one-time code verifier and challenge: a program that intercepts the authorization code from the redirect cannot exchange it without the verifier. Kroger authorization endpoints support this in API version 1.0.17. `authenticate_user` and the `kroger-mcp` sign-in tools use it. If you build the flow yourself, use it too:
 
 ```python
 from kroger_api.utils import generate_pkce_parameters

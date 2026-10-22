@@ -190,8 +190,9 @@ Optional filters must be `None` to be left out. An empty string, such as `brand=
 
 When a request gets a `401`, the client tries once to get a new token and resend the request:
 
-1. A user token is refreshed. The client first sends the refresh token from the token file, then the one in memory if it differs and Kroger rejected the first. The file holds the newest refresh token: the client saves every refresh there, and another process that shares the file may have refreshed the token since this client loaded it. Sending the newest one first means that a refresh token that was already used is not sent while a newer one exists.
+1. A user token is renewed while the client holds the lock of its token file, so threads and processes that share the file renew it one at a time. If another thread or process renewed the token while this one waited, the client uses the saved token and sends no refresh request. Otherwise it sends the refresh token from the token file first, then the one in memory if it differs and Kroger rejected the first. The file holds the newest refresh token, so a refresh token that was already used is not sent while a newer one exists. See [Refresh tokens automatically](../how-to/refresh-tokens.md#share-a-sign-in-between-processes).
 1. A client-credentials token from `get_token_with_client_credentials` is replaced with a new one for the same scope.
+1. If another thread replaced the client's token after the request was sent, the request is resent with that token.
 
 Any other token is not replaced. A user token without a refresh token, for example, is never swapped for a client-credentials token, even after you switch the client to client credentials and back.
 
