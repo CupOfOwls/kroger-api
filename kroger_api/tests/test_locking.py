@@ -13,16 +13,22 @@ import pytest
 from kroger_api.utils import locking
 from kroger_api.utils.locking import file_lock
 
+if os.name != "nt":
+    import fcntl
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Holds the lock of argv[1] until stdin closes, after printing "locked"
+# Holds the lock of argv[1] until stdin closes, after printing "locked";
+# argv[2], if given, is the timeout
 HOLDER = """
 import sys
 from kroger_api.utils.locking import file_lock
-with file_lock(sys.argv[1], timeout=5) as held:
+with file_lock(sys.argv[1], timeout=float(sys.argv[2]) if len(sys.argv) > 2 else 5) as held:
     print("locked" if held else "not locked", flush=True)
     sys.stdin.read()
 """
+
+posix_only = pytest.mark.skipif(os.name == "nt", reason="uses flock")
 
 
 @pytest.fixture
@@ -73,13 +79,17 @@ def test_another_process_holding_the_lock_makes_this_one_wait(path, other_proces
         assert held is True
 
 
+def another_process_can_lock(path, timeout=5):
+    result = subprocess.run([sys.executable, "-c", HOLDER, path, str(timeout)], input="", capture_output=True,
+                            text=True, timeout=30, cwd=REPO_ROOT)
+    return result.stdout.strip() == "locked"
+
+
 def test_lock_is_released_for_other_processes(path):
     with file_lock(path, timeout=5) as held:
         assert held
     # A new process gets the lock at once
-    result = subprocess.run([sys.executable, "-c", HOLDER, path], input="", capture_output=True, text=True,
-                            timeout=10, cwd=REPO_ROOT)
-    assert result.stdout.strip() == "locked"
+    assert another_process_can_lock(path)
 
 
 def test_timeout_goes_on_without_the_lock_and_warns(path, other_process, caplog):
@@ -120,3 +130,89 @@ def test_file_system_without_locks_goes_on_without_the_lock(path, monkeypatch, c
     # Not a lock held elsewhere, so there is nothing to wait for
     assert time.monotonic() - started < 1
     assert "No locks available" in caplog.text
+
+
+@posix_only
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="needs os.fork")
+def test_a_forked_child_that_leaves_the_block_keeps_the_parents_lock(path):
+    """The child's copy of the lock file shares the parent's lock, so unlocking it would release both"""
+
+    def fork_in_block():
+        with file_lock(path, timeout=5) as held:
+            assert held
+            child = os.fork()
+            if child:
+                os.waitpid(child, 0)
+                # The child has left the block and exited
+                return another_process_can_lock(path, timeout=0.2)
+
+    parent = os.getpid()
+    try:
+        locked_elsewhere = fork_in_block()
+    finally:
+        if os.getpid() != parent:
+            os._exit(0)
+    assert locked_elsewhere is False
+    assert another_process_can_lock(path)
+
+
+class FakeMsvcrt:
+    """msvcrt.locking as Microsoft documents it, on top of flock, to run the Windows code here
+
+    A lock held elsewhere fails with EACCES, and locking and unlocking start
+    at the file's current position. Each call is recorded as (mode, position, nbytes).
+    """
+
+    LK_UNLCK, LK_NBLCK = 0, 2
+
+    def __init__(self):
+        self.calls = []
+
+    def locking(self, fd, mode, nbytes):
+        self.calls.append((mode, os.lseek(fd, 0, os.SEEK_CUR), nbytes))
+        if mode == self.LK_UNLCK:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise PermissionError(errno.EACCES, "Permission denied") from None
+
+
+@pytest.fixture
+def windows(monkeypatch):
+    fake = FakeMsvcrt()
+    monkeypatch.setattr(locking, "_WINDOWS", True)
+    monkeypatch.setattr(locking, "msvcrt", fake, raising=False)
+    return fake
+
+
+@posix_only
+def test_windows_waits_for_a_lock_held_by_another_process(path, other_process, windows):
+    started = time.monotonic()
+    with file_lock(path, timeout=0.3) as held:
+        assert held is False
+    assert time.monotonic() - started >= 0.3
+    assert len(windows.calls) > 1
+    assert all(call == (FakeMsvcrt.LK_NBLCK, 0, 1) for call in windows.calls)
+
+    other_process.stdin.close()
+    other_process.wait(timeout=10)
+    with file_lock(path, timeout=5) as held:
+        assert held is True
+    assert windows.calls[-1] == (FakeMsvcrt.LK_UNLCK, 0, 1)
+    assert another_process_can_lock(path)
+
+
+@posix_only
+def test_windows_error_other_than_a_held_lock_goes_on_at_once(path, windows, monkeypatch, caplog):
+    def locking(fd, mode, nbytes):
+        raise OSError(errno.EBADF, "Bad file descriptor")
+
+    monkeypatch.setattr(windows, "locking", locking)
+    started = time.monotonic()
+    with caplog.at_level(logging.WARNING, logger="kroger_api.utils.locking"):
+        with file_lock(path, timeout=5) as held:
+            assert held is False
+    assert time.monotonic() - started < 1
+    assert "Bad file descriptor" in caplog.text

@@ -12,7 +12,8 @@ import time
 from contextlib import contextmanager
 from typing import Dict, Generator, Optional
 
-if os.name == "nt":
+_WINDOWS = os.name == "nt"
+if _WINDOWS:
     import msvcrt
 else:
     import fcntl
@@ -41,6 +42,9 @@ class _PathLock:
         self.thread_lock = threading.RLock()
         self.depth = 0
         self.fd: Optional[int] = None
+        # The process that locked fd. A child forked while the lock is held
+        # has a copy of fd that shares the lock, and must not unlock it.
+        self.pid: Optional[int] = None
 
 
 _locks: Dict[str, _PathLock] = {}
@@ -49,7 +53,8 @@ _locks_guard = threading.Lock()
 
 def _forget_locks():
     # A child process has only the thread that forked it, so locks held by
-    # other threads of the parent would never be released in the child
+    # other threads of the parent would never be released in the child. Its
+    # copies of their lock files close when it runs another program or exits.
     global _locks, _locks_guard
     _locks, _locks_guard = {}, threading.Lock()
 
@@ -91,6 +96,7 @@ def file_lock(path: str, timeout: Optional[float] = None) -> Generator[bool, Non
     try:
         if lock.depth == 0:
             lock.fd = _lock_file(lock_path, deadline, timeout)
+            lock.pid = os.getpid()
         held = lock.fd is not None
         if held:
             lock.depth += 1
@@ -100,7 +106,11 @@ def file_lock(path: str, timeout: Optional[float] = None) -> Generator[bool, Non
             if held:
                 lock.depth -= 1
                 if lock.depth == 0 and lock.fd is not None:
-                    _unlock_file(lock_path, lock.fd)
+                    if lock.pid == os.getpid():
+                        _unlock_file(lock_path, lock.fd)
+                    else:
+                        # A forked child: closing its copy leaves the parent's lock held
+                        os.close(lock.fd)
                     lock.fd = None
     finally:
         lock.thread_lock.release()
@@ -119,15 +129,20 @@ def _lock_file(lock_path: str, deadline: float, timeout: float) -> Optional[int]
         return None
     while True:
         try:
-            if os.name == "nt":
+            if _WINDOWS:
+                # Some versions of the C runtime wait 1 second before they
+                # report a lock held elsewhere, so on Windows an attempt can
+                # take that long and the timeout can be exceeded by as much
                 msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
             else:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return fd
         except OSError as e:
-            # flock reports a lock held elsewhere as BlockingIOError;
-            # msvcrt.locking raises OSError for it
-            busy = isinstance(e, BlockingIOError) or os.name == "nt"
+            # A lock held elsewhere is EWOULDBLOCK (BlockingIOError) from
+            # flock and EACCES (PermissionError) from msvcrt.locking. Other
+            # errors, such as a file system without locks, do not go away
+            # with waiting.
+            busy = isinstance(e, PermissionError if _WINDOWS else BlockingIOError)
             if not busy:
                 os.close(fd)
                 logger.warning("Could not lock %s (%s); going on without the lock", lock_path, e)
@@ -142,7 +157,8 @@ def _lock_file(lock_path: str, deadline: float, timeout: float) -> Optional[int]
 
 def _unlock_file(lock_path: str, fd: int) -> None:
     try:
-        if os.name == "nt":
+        if _WINDOWS:
+            # msvcrt.locking unlocks from the current position, like it locks
             os.lseek(fd, 0, os.SEEK_SET)
             msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
         else:
