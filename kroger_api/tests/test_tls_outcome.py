@@ -7,7 +7,6 @@ the handshake, may be reported as never sent.
 """
 import datetime
 import ipaddress
-import os
 import select
 import socket
 import ssl
@@ -114,8 +113,9 @@ def _serve_once(certificate, received, after="garbage"):
                 body += conn.recv(65536)
             received.append(head.split(b"\r\n")[0].decode())
             if after == "garbage":
-                # Write to the socket under the TLS layer, so the bytes are not a TLS record
-                os.write(conn.fileno(), b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                # Write to the socket under the TLS layer, so the bytes are not a TLS record.
+                # The base class's sendall skips SSLSocket's; os.write fails on Windows sockets.
+                socket.socket.sendall(conn, b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
             time.sleep(0.2)
         listener.close()
 

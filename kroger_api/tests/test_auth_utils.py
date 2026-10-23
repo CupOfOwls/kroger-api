@@ -48,7 +48,8 @@ def test_saved_token_is_private_and_replaces_the_old_file(token_dir):
     save_token({"access_token": "second"}, "token.json")
     path = get_token_file_path("token.json")
     assert load_token("token.json")["access_token"] == "second"
-    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    if os.name != "nt":  # Windows has no file modes; the file gets its folder's permissions
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
     assert sorted(os.listdir(token_dir)) == ["token.json"]  # no temporary file left behind
 
 

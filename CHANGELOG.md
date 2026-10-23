@@ -40,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`authenticate_user` uses PKCE** (RFC 7636). The code exchange needs a verifier that never leaves the process, so an authorization code that another program intercepts from the redirect to `localhost` cannot be used. It did not use PKCE, although the library supports it and kroger-mcp's sign-in used it.
 - `generate_random_state` uses the `secrets` module. It used `random`, whose output can be predicted, for the OAuth state that guards against cross-site request forgery.
-- `save_token` writes a temporary file that is private (mode 600) from the moment it is created, then replaces the token file with it. It used to write the token file with default permissions and restrict them afterward, and a failed or concurrent write could leave a half-written file.
+- `save_token` writes a temporary file that is private (mode 600 on Linux and macOS) from the moment it is created, then replaces the token file with it. It used to write the token file with default permissions and restrict them afterward, and a failed or concurrent write could leave a half-written file.
 
 ### Changed
 

@@ -112,7 +112,8 @@ def test_lock_is_reentrant_within_a_thread(path):
 def test_lock_file_is_private_and_kept(path):
     with file_lock(path):
         pass
-    assert stat.S_IMODE(os.stat(path + ".lock").st_mode) == 0o600
+    if os.name != "nt":  # Windows has no file modes; the file gets its folder's permissions
+        assert stat.S_IMODE(os.stat(path + ".lock").st_mode) == 0o600
     with file_lock(path) as held:
         assert held
 

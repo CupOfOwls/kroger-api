@@ -73,7 +73,8 @@ def save_token(token_info: Dict[str, Any], token_file: str = TOKEN_FILE) -> None
     Save a token to a file.
 
     The token is written to a temporary file that only the owner can read
-    (mode 600 from the start), which then replaces the old file. A reader,
+    (mode 600 from the start; on Windows, which has no file modes, the
+    folder's permissions apply), which then replaces the old file. A reader,
     such as another process that shares the token, never sees a
     half-written file.
     
