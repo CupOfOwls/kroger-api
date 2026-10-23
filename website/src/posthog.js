@@ -111,6 +111,7 @@ if (ExecutionEnvironment.canUseDOM) {
 // Docusaurus calls this on the first load and every client-side navigation.
 export function onRouteDidUpdate({ location, previousLocation }) {
   if (!ExecutionEnvironment.canUseDOM) return;
-  if (previousLocation && location.pathname === previousLocation.pathname) return;
+  if (previousLocation && location.pathname === previousLocation.pathname)
+    return;
   if (posthog.__loaded) posthog.capture("$pageview");
 }

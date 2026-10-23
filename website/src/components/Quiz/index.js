@@ -27,7 +27,9 @@ function slugify(text) {
 // collide into one series.
 function currentPageSlug() {
   if (typeof window === "undefined") return "index";
-  return window.location.pathname.replace(/\/+$/, "").split("/").pop() || "index";
+  return (
+    window.location.pathname.replace(/\/+$/, "").split("/").pop() || "index"
+  );
 }
 
 /**
