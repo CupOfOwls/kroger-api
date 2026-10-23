@@ -37,17 +37,17 @@ The Model Context Protocol (MCP) is an open standard that allows AI applications
 
 This lab uses Claude Desktop or Claude Code, but any MCP-capable client works. kroger-mcp runs as a local (stdio) server, so pick a client that can run a local server. Each client's setup differs; see its docs for how to add one:
 
-| Client          | How to add an MCP server                                                                                                                        |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Desktop  | [Local MCP servers on Claude Desktop](https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop) |
-| Claude Code     | [Connect Claude Code to tools via MCP](https://code.claude.com/docs/en/mcp)                                                                     |
-| ChatGPT Desktop | [Developer mode](https://platform.openai.com/docs/guides/developer-mode) (remote MCP servers only; needs a Plus or Pro plan)                    |
-| OpenAI Codex    | [Extend Codex with MCP](https://developers.openai.com/codex/extend/mcp)                                                                         |
-| Antigravity CLI | [MCP in Antigravity](https://antigravity.google/docs/cli/mcp)                                                                                   |
-| OpenCode        | [MCP servers](https://opencode.ai/docs/mcp-servers/)                                                                                            |
-| Charm Crush     | [MCPs](https://github.com/charmbracelet/crush#mcps)                                                                                             |
+| Client          | How to add an MCP server                                                                                                                                                                                                        |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Desktop  | [Local MCP servers on Claude Desktop](https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop)                                                                                 |
+| Claude Code     | [Connect Claude Code to tools via MCP](https://code.claude.com/docs/en/mcp)                                                                                                                                                     |
+| ChatGPT         | [Connecting custom MCP servers in ChatGPT](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt) (remote MCP servers only, on ChatGPT web; full MCP needs a Business, Enterprise, or Edu plan) |
+| OpenAI Codex    | [Extend Codex with MCP](https://developers.openai.com/codex/extend/mcp)                                                                                                                                                         |
+| Antigravity CLI | [MCP in Antigravity](https://antigravity.google/docs/cli/mcp)                                                                                                                                                                   |
+| OpenCode        | [MCP servers](https://opencode.ai/docs/mcp-servers/)                                                                                                                                                                            |
+| Charm Crush     | [MCPs](https://github.com/charmbracelet/crush#mcps)                                                                                                                                                                             |
 
-ChatGPT Desktop connects only to remote (HTTP) MCP servers, so it cannot run a local kroger-mcp directly.
+ChatGPT connects only to remote (HTTP) MCP servers, so it cannot run a local kroger-mcp directly.
 
 ## Step 1: Install and configure kroger-mcp
 
